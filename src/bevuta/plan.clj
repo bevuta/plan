@@ -298,7 +298,7 @@
                       (filter all-steps))
         ns-plan (devise ns-steps)
         missing (->> (::inputs ns-plan)
-                     (map (partial find all-steps))
+                     (map (juxt identity (partial get all-steps)))
                      (concat (::steps ns-plan))
                      (remove get-step-spec)
                      (map first))]
@@ -314,4 +314,6 @@
                                                        [(keyword (str dep-name))
                                                         (get-step-spec (find all-steps dep-name))])
                                                      (:deps step)))
+                              ~@(when-let [fn-spec (:fn (s/get-spec step-name))]
+                                  [:fn fn-spec])
                               :ret ~(get-step-spec step-name step))))))))
