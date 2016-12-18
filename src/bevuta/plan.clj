@@ -297,12 +297,12 @@
                       (map #(symbol (name (ns-name *ns*)) (name %)))
                       (filter all-steps))
         ns-plan (devise ns-steps)
-        missing (->> (::inputs ns-plan)
-                     (map (juxt identity (partial get all-steps)))
-                     (concat (::steps ns-plan))
-                     (remove get-step-spec)
-                     (map first))]
-    (when (seq missing)
+        ns-step-specs (->> (::inputs ns-plan)
+                           (map (juxt identity (partial get all-steps)))
+                           (concat (::steps ns-plan))
+                           (map (juxt first get-step-spec))
+                           (into {}))]
+    (when-let [missing (->> ns-step-specs (remove val) (map first) seq)]
       (throw (ex-info "Missing specs for some steps"
                       {:steps missing})))
     `(do
@@ -312,8 +312,8 @@
                      `(s/fdef ~step-name
                               :args (s/cat ~@(mapcat (fn [dep-name]
                                                        [(keyword (str dep-name))
-                                                        (get-step-spec (find all-steps dep-name))])
+                                                        (get ns-step-specs dep-name)])
                                                      (:deps step)))
                               ~@(when-let [fn-spec (:fn (s/get-spec step-name))]
                                   [:fn fn-spec])
-                              :ret ~(get-step-spec step-name step))))))))
+                              :ret ~(get ns-step-specs step-name))))))))

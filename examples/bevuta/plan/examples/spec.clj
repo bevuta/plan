@@ -26,7 +26,7 @@
         :ret bigdec?)
 
 (p/defn gamma []
-  10)
+  10M)
 
 (stest/check `delta)
 
@@ -52,7 +52,8 @@
 
 ;; The keywordized qualified input names are used in the `:args` spec:
 (s/conform (:args (s/get-spec `alpha)) [10M 20M])
-;; => #::{:gamma 10M, :delta 20M}
+
+(comment => #::{:gamma 10M, :delta 20M})
 
 ;; `:fn` specs are preserved by `fdefs`. The following example
 ;; demonstrates this by intentionally defining an invalid `:fn` spec:
@@ -69,10 +70,11 @@
 ;; Now `stest/check` should find the expected failure:
 
 (-> (stest/check `alpha) first stest/abbrev-result :failure ::s/problems)
-;; => [{:path [:fn]
-;;      :pred (fn ...)
-;;      :val {:args #::{:gamma 1.0M, :delta 1.0M}
-;;            :ret 2.0M}
-;;      :via [],
-;;      :in []}]
+(comment
+  => [{:path [:fn]
+       :pred (fn ...)
+       :val {:args #::{:gamma 1.0M, :delta 1.0M}
+             :ret 2.0M}
+       :via [],
+       :in []}])
 
