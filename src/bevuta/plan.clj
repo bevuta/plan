@@ -33,14 +33,11 @@
 (s/def ::value any?)
 
 (s/def ::step
-  (s/or :dynamic  (s/keys :req-un [::deps]
-                          :opt-un [::fn ::spec])
-        :constant (s/keys :req-un [::value])
-        :static   (s/keys :opt-un [::spec])))
+  (s/keys :req-un [(or ::deps (and ::fn ::deps))]
+          :opt-un [::value ::spec]))
 
 (s/def ::step*
-  (s/alt :dynamic (s/keys* :req-un [::deps])
-         :constant (s/cat)))
+  (s/keys* :opt-un [::deps]))
 
 (s/def ::inputs
   (s/map-of ::step-name ::value
@@ -67,9 +64,9 @@
   (list 'quote v))
 
 (c/defn quote-step [step]
-  (case (key step)
-    :dynamic (update (val step) :deps (partial mapv quote-value))
-    (val step)))
+  (if (:deps step)
+    (update step :deps (partial mapv quote-value))
+    step))
 
 (s/fdef def
         :args (s/cat :name ::step-name
