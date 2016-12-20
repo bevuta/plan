@@ -190,12 +190,13 @@
                  visited
                  inputs
                  (rest deps))
-          (if-let [dep-step (or (get overrides dep)
-                                (get all-steps dep))]
-            (recur (conj steps [dep dep-step])
+          (if-let [dep-step (or (find overrides dep)
+                                (find all-steps dep))]
+            (recur (conj steps dep-step)
                    (conj visited dep)
                    inputs
-                   (concat (rest deps) (:deps dep-step)))
+                   (concat (rest deps)
+                           (-> dep-step val :deps)))
             (recur steps
                    (conj visited dep)
                    (conj inputs dep)
