@@ -1,5 +1,5 @@
 (ns bevuta.plan
-  (:refer-clojure :exclude [def defn compile])
+  (:refer-clojure :exclude [def defn])
   (:require [clojure.core :as c]
             [clojure.spec :as s]
             [clojure.set :as set]))
@@ -121,17 +121,11 @@
 (alias 'strategy 'bevuta.plan.strategy)
 
 (def in-sequence
-  #::strategy{:compile-step cons
-              :compile-deref-result identity
-              :eval-step apply
+  #::strategy{:eval-step apply
               :deref-result identity})
 
 (def in-parallel
-  #::strategy{:compile-step (fn [step-fn args]
-                              `(future (~step-fn ~@args)))
-              :compile-deref-result (fn [result]
-                                      `(deref ~result))
-              :eval-step (fn [step-fn args]
+  #::strategy{:eval-step (fn [step-fn args]
                            (future (apply step-fn args)))
               :deref-result deref})
 
@@ -237,48 +231,6 @@
   ([strategy plan inputs]
    (let [inputs (validated-inputs (::inputs plan) inputs)]
      (realize-steps strategy inputs (::steps plan)))))
-
-(defmacro compile [strategy plan]
-  (let [{::keys [steps inputs overrides]} (eval plan)
-        locals (into {}
-                     (map (fn [step-name]
-                            [step-name (gensym (name step-name))]))
-                     (concat inputs (map first steps)))
-        static-steps (set (keep (fn [[step-name step]]
-                                  (when-not (:deps step)
-                                    step-name))
-                                steps))
-        {::strategy/keys [compile-step compile-deref-result]} (eval strategy)
-        compile-deref-step (fn [step-name]
-                             (let [local (get locals step-name)]
-                               (if (or (contains? inputs step-name)
-                                       (contains? static-steps step-name))
-                                 local
-                                 (compile-deref-result local))))
-        inputs-sym (gensym 'inputs)]
-    `(let [expected-inputs# '~inputs]
-       (fn [~inputs-sym]
-         (let [~(->> (select-keys locals inputs)
-                     (map (fn [[qname local]]
-                            [local (quote-value qname)]))
-                     (into {})) (validated-inputs expected-inputs# ~inputs-sym)
-               ~@(mapcat (fn [[name step]]
-                           [(get locals name)
-                            (if (contains? static-steps name)
-                              `(or (get ~inputs-sym '~name) ~name)
-                              (let [override (get overrides name)]
-                                (get-or override
-                                        :value
-                                        (let [step-fn (or (:fn override) name)
-                                              args (map compile-deref-step
-                                                        (:deps step))]
-                                          (compile-step step-fn args)))))])
-                         steps)]
-           ~(into {}
-                  (map (fn [step-name]
-                         [(quote-value step-name)
-                          (compile-deref-step step-name)]))
-                  (keys locals)))))))
 
 (c/defn get-step-spec
   ([step-name step]

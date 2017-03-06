@@ -92,10 +92,5 @@
              cross-module-example-plan
              inputs))
 
-;; Or compiled accordingly
-(def compiled-cross-module-example
-  (p/compile p/in-sequence cross-module-example-plan))
-
-;; (compiled-cross-module-example `{b/beta 10, data-points [1 2 3]})
 ;; (cross-module-example `{b/beta 10, data-points [1 2 3]})
 
