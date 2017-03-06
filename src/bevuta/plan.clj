@@ -115,17 +115,29 @@
   (or (:fn step)
       (resolve-var step-name)))
 
-(create-ns 'bevuta.plan.strategy)
-(alias 'strategy 'bevuta.plan.strategy)
+(defprotocol Strategy
+  (realize-step [_ step-fn args])
+  (step-result [_ step-ref]))
 
 (def in-sequence
-  #::strategy{:eval-step apply
-              :deref-result identity})
+  (reify
+    Object
+    (toString [_] "in-sequence")
+    Strategy
+    (realize-step [_ step-fn args]
+      (apply step-fn args))
+    (step-result [_ result]
+      result)))
 
 (def in-parallel
-  #::strategy{:eval-step (fn [step-fn args]
-                           (future (apply step-fn args)))
-              :deref-result deref})
+  (reify
+    Object
+    (toString [_] "in-parallel")
+    Strategy
+    (realize-step [_ step-fn args]
+      (future (apply step-fn args)))
+    (step-result [_ step-future]
+      @step-future)))
 
 (defmacro get-or [map key else]
   `(if-let [[_# value#] (find ~map ~key)]
@@ -137,11 +149,10 @@
 ;; allows it to defer potentially blocking derefs to another thread,
 ;; for example.
 (c/defn realize-steps [strategy inputs steps]
-  (let [{::strategy/keys [eval-step deref-result]} strategy
-        deref-arg (fn [inputs results step-name]
+  (let [deref-arg (fn [inputs results step-name]
                     (get-or inputs
                             step-name
-                            (deref-result (get results step-name))))]
+                            (step-result strategy (get results step-name))))]
     (loop [steps   steps
            inputs  inputs
            results {}]
@@ -150,7 +161,7 @@
           (if-let [deps (:deps step)]
             (let [step-fn (resolve-step-fn step-name step)
                   args    (map (partial deref-arg inputs results) deps)
-                  result  (eval-step step-fn args)]
+                  result  (realize-step strategy step-fn args)]
               (recur (rest steps)
                      inputs
                      (assoc results step-name result)))
@@ -165,7 +176,7 @@
                    results)))
         (into inputs
               (map (fn [[k v]]
-                     [k (deref-result v)]))
+                     [k (step-result strategy v)]))
               results)))))
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
