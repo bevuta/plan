@@ -43,8 +43,8 @@
             :conform-keys true))
 
 (s/def ::goals
-  (s/and (s/or :single (s/and ::step-name (s/conformer vector))
-               :multi  (s/coll-of ::step-name :into #{}))
+  (s/and (s/or :multi  (s/coll-of ::step-name :into #{})
+               :single (s/and ::step-name (s/conformer vector) ::goals))
          (s/conformer val)))
 
 (s/def ::overrides
@@ -136,8 +136,8 @@
 
 ;; NOTE: We rely on `map`s laziness here so that steps are actually
 ;; only dereferenced when `eval-step` realizes the args sequence. This
-;; allows it to defer potentially blocking derefs to e.g. another
-;; thread.
+;; allows it to defer potentially blocking derefs to another thread,
+;; for example.
 (c/defn realize-steps [strategy inputs steps]
   (let [{::strategy/keys [eval-step deref-result]} strategy
         deref-arg (fn [inputs results step-name]
@@ -196,7 +196,7 @@
                    (rest deps))))))))
 
 ;; TODO: Or (also) detect cycles here?
-;; TODO: Fail when goals contain inputs?
+;; TODO: Fail when goals contain (only?) inputs?
 (c/defn devise
   ([goals]
    (devise {} goals))
