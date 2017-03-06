@@ -73,15 +73,13 @@
 
 ;; TODO: Detect cycles here?
 (defmacro def
-  ([step-name]
-   `(bevuta.plan/def ~step-name {}))
-  ([step-name & definition]
-   (let [step-name (s/conform ::step-name step-name)
-         step (s/conform ::step* definition)]
-     `(swap! step-registry
-             assoc
-             '~step-name
-             ~(quote-step step)))))
+  [step-name & definition]
+  (let [step-name (s/conform ::step-name step-name)
+        step (s/conform ::step* definition)]
+    `(swap! step-registry
+            assoc
+            '~step-name
+            ~(quote-step step))))
 
 (s/def ::dep-destructuring
   (s/keys :req [::dep]))
