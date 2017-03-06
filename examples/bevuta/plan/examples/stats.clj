@@ -3,11 +3,11 @@
   (:require [clojure.core :as c]
             [clojure.spec :as s]
             [bevuta.plan :as p]
-            [bevuta.plan.example.basics :as b]))
+            [bevuta.plan.examples.basics :as b]))
 
 ;; A step is defined with a name and its dependencies
 (p/def count
-  {:deps [data-points]})
+  :deps [data-points])
 
 ;; Upon realization, the function with the same name will be called
 ;; with the dependencies passed in the same order as in the step
@@ -17,8 +17,8 @@
 
 ;; Alternatively, the step function can be defined inline
 (p/def count
-  {:deps [data-points]
-   :fn c/count})
+  :deps [data-points]
+  :fn c/count)
 
 ;; There is syntactic sugar to define a step and its dependencies in
 ;; one go - note that the arguments *must* match the dependency names
@@ -96,4 +96,6 @@
 (def compiled-cross-module-example
   (p/compile p/in-sequence cross-module-example-plan))
 
-;; (cross-module-example `{b/theta 10 data-points [1 2 3]})
+;; (compiled-cross-module-example `{b/beta 10, data-points [1 2 3]})
+;; (cross-module-example `{b/beta 10, data-points [1 2 3]})
+

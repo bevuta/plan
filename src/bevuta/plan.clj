@@ -33,8 +33,7 @@
 (s/def ::value any?)
 
 (s/def ::step
-  (s/keys :req-un [(or ::deps (and ::fn ::deps))]
-          :opt-un [::value ::spec]))
+  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps))]))
 
 (s/def ::step*
   (s/keys* :opt-un [::deps]))
@@ -49,10 +48,10 @@
          (s/conformer val)))
 
 (s/def ::overrides
-  (s/map-of ::step-name (s/and ::step (s/conformer val))
+  (s/map-of ::step-name ::step
             :conform-keys true))
 
-(defonce step-registry
+(def step-registry
   (atom {}))
 
 (c/defn asserting-conform
@@ -203,6 +202,7 @@
                    (rest deps))))))))
 
 ;; TODO: Or (also) detect cycles here?
+;; TODO: Fail when goals contain inputs?
 (c/defn devise
   ([goals]
    (devise {} goals))

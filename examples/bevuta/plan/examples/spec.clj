@@ -56,7 +56,7 @@
 (comment => #::{:gamma 10M, :delta 20M})
 
 ;; `:fn` specs are preserved by `fdefs`. The following example
-;; demonstrates this by intentionally defining an invalid `:fn` spec:
+;; demonstrates this by intentionally defining a wrong `:fn` spec:
 
 (s/fdef alpha
         :ret bigdec?
