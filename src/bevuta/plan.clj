@@ -116,68 +116,86 @@
       (resolve-var step-name)))
 
 (defprotocol Strategy
-  (realize-step [_ step-fn args])
-  (step-result [_ step-ref]))
+  (realize-step [_ ctx step-fn args])
+  (step-result [_ step-ref])
+  (step-result-done? [_ step-ref]))
 
 (def in-sequence
   (reify
     Object
     (toString [_] "in-sequence")
     Strategy
-    (realize-step [_ step-fn args]
+    (realize-step [_ ctx step-fn args]
       (apply step-fn args))
     (step-result [_ result]
-      result)))
+      result)
+    (step-result-done? [_ _]
+      true)))
 
 (def in-parallel
   (reify
     Object
     (toString [_] "in-parallel")
     Strategy
-    (realize-step [_ step-fn args]
+    (realize-step [_ ctx step-fn args]
       (future (apply step-fn args)))
     (step-result [_ step-future]
-      @step-future)))
+      @step-future)
+    (step-result-done? [_ step-future]
+      (future-done? step-future))))
+
+(defn wrap [strategy middleware]
+  (reify Strategy
+    Object
+    (toString [_] (str strategy))
+    Strategy
+    (realize-step [_ ctx step-fn args]
+      (middleware ctx #(realize-step strategy %1 step-fn %2) args))
+    (step-result [_ step]
+      (step-result strategy step))
+    (step-result-done? [_ step-ref]
+      (step-result-done? strategy step-ref))))
 
 (defmacro get-or [map key else]
   `(if-let [[_# value#] (find ~map ~key)]
      value#
      ~else))
 
+(defn step-val [strategy ctx step-name]
+  (get-or (::inputs ctx)
+          step-name
+          (step-result strategy (get-in ctx [::results step-name]))))
+
 ;; NOTE: We rely on `map`s laziness here so that steps are actually
 ;; only dereferenced when `realize-step` realizes the `args`
 ;; sequence. This allows it to defer potentially blocking derefs to
 ;; another thread, for example.
 (c/defn realize-steps [strategy inputs steps]
-  (let [deref-arg (fn [inputs results step-name]
-                    (get-or inputs
-                            step-name
-                            (step-result strategy (get results step-name))))]
-    (loop [steps   steps
-           inputs  inputs
-           results {}]
-      (if (seq steps)
-        (let [[step-name step] (first steps)]
-          (if-let [deps (:deps step)]
-            (let [step-fn (resolve-step-fn step-name step)
-                  args    (map (partial deref-arg inputs results) deps)
-                  result  (realize-step strategy step-fn args)]
-              (recur (rest steps)
-                     inputs
-                     (assoc results step-name result)))
-            (recur (rest steps)
-                   (if (contains? inputs step-name)
-                     inputs
-                     (assoc inputs
-                            step-name
-                            (get-or step
-                                    :value
-                                    (resolve-var step-name))))
-                   results)))
-        (into inputs
-              (map (fn [[k v]]
-                     [k (step-result strategy v)]))
-              results)))))
+  (loop [{::keys [steps inputs results]
+          :as ctx}
+         {::steps steps
+          ::inputs inputs
+          ::results {}}]
+    (if (seq steps)
+      (let [[step-name step] (first steps)]
+        (if-let [deps (:deps step)]
+          (let [step-fn (resolve-step-fn step-name step)
+                ctx     (assoc ctx ::step-name step-name)
+                args    (map (partial step-val strategy ctx) deps)
+                result  (realize-step strategy ctx step-fn args)]
+            (recur (-> ctx
+                       (update ::steps rest)
+                       (assoc-in [::results step-name] result))))
+          (recur (cond-> (update ctx ::steps rest)
+                   (not (contains? inputs step-name))
+                   (assoc-in [::inputs step-name]
+                             (get-or step
+                                     :value
+                                     (resolve-var step-name)))))))
+      (into inputs
+            (map (fn [[k v]]
+                   [k (step-result strategy v)]))
+            results))))
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
   (loop [steps ()

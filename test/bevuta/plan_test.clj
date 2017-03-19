@@ -72,3 +72,14 @@
               delta 4
               other/delta 8
               delta-sum 12})))
+
+
+(deftest middleware-test []
+  (let [log (atom [])]
+    (p/realize (p/wrap p/in-sequence
+                       (fn [ctx realize args]
+                         (swap! log conj (::p/step-name ctx))
+                         (realize ctx args)))
+               (p/devise `delta-sum)
+               `{beta 2})
+    (is (= `[delta delta-sum] @log))))
