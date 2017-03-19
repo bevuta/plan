@@ -145,9 +145,9 @@
      ~else))
 
 ;; NOTE: We rely on `map`s laziness here so that steps are actually
-;; only dereferenced when `eval-step` realizes the args sequence. This
-;; allows it to defer potentially blocking derefs to another thread,
-;; for example.
+;; only dereferenced when `realize-step` realizes the `args`
+;; sequence. This allows it to defer potentially blocking derefs to
+;; another thread, for example.
 (c/defn realize-steps [strategy inputs steps]
   (let [deref-arg (fn [inputs results step-name]
                     (get-or inputs
