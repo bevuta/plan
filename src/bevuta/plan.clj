@@ -140,7 +140,11 @@
     (realize-step [_ ctx step-fn args]
       (future (apply step-fn args)))
     (step-result [_ step-future]
-      @step-future)
+      (try
+        @step-future
+        ;; TODO: Is this a good idea? ;-)
+        (catch java.util.concurrent.ExecutionException e
+          (throw (.getCause e)))))
     (step-result-done? [_ step-future]
       (future-done? step-future))))
 
@@ -150,7 +154,7 @@
     (toString [_] (str strategy))
     Strategy
     (realize-step [_ ctx step-fn args]
-      (middleware ctx #(realize-step strategy %1 step-fn %2) args))
+      (middleware strategy ctx step-fn args))
     (step-result [_ step]
       (step-result strategy step))
     (step-result-done? [_ step-ref]

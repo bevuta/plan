@@ -1,6 +1,7 @@
 (ns bevuta.plan-test
   (:require [clojure.test :refer :all]
             [bevuta.plan :as p]
+            [bevuta.plan.middleware :as pm]
             [bevuta.other-test-ns :as other]))
 
 (defn alpha [x y]
@@ -73,13 +74,32 @@
               other/delta 8
               delta-sum 12})))
 
+(p/defn boom [beta]
+  (throw (ex-info "boom" {::boom ::boom})))
+
+(deftest error-handling-test []
+  (try
+    (p/realize p/in-sequence (p/devise `boom) {`beta 10})
+    (is false)
+    (catch Exception e
+      (is (= (ex-data e) {::boom ::boom})))))
 
 (deftest middleware-test []
   (let [log (atom [])]
     (p/realize (p/wrap p/in-sequence
-                       (fn [ctx realize args]
+                       (fn [strategy ctx step-fn args]
                          (swap! log conj (::p/step-name ctx))
-                         (realize ctx args)))
+                         (p/realize-step strategy ctx step-fn args)))
                (p/devise `delta-sum)
                `{beta 2})
     (is (= `[delta delta-sum] @log))))
+
+(deftest error-ctx-middleware []
+  (try
+    (p/realize (p/wrap p/in-parallel pm/error-context)
+               (p/devise `boom)
+               {`beta 10})
+    (is false)
+    (catch Exception e
+      (is (= (::p/step-name (ex-data e)) `boom))
+      (is (= (ex-data (.getCause e)) {::boom ::boom})))))
