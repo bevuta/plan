@@ -87,7 +87,7 @@
 
 (deftest middleware-test []
   (let [log (atom [])]
-    (p/realize (p/wrap-strategy p/in-sequence
+    (p/realize (p/wrap-strategy p/in-parallel
                                 (fn [ctx]
                                   (swap! log conj (::p/step-name ctx))
                                   (assoc ctx ::test :foo))
