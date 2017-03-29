@@ -116,17 +116,20 @@
       (resolve-var step-name)))
 
 (defprotocol Strategy
-  (realize-step [_ ctx step-fn args])
+  (realize-step [_ ctx])
   (step-result [_ step-ref])
   (step-result-done? [_ step-ref]))
+
+(defn call-step-fn [ctx]
+  (apply (::step-fn ctx) (::step-args ctx)))
 
 (def in-sequence
   (reify
     Object
     (toString [_] "in-sequence")
     Strategy
-    (realize-step [_ ctx step-fn args]
-      (apply step-fn args))
+    (realize-step [_ ctx]
+      (call-step-fn ctx))
     (step-result [_ result]
       result)
     (step-result-done? [_ _]
@@ -137,8 +140,8 @@
     Object
     (toString [_] "in-parallel")
     Strategy
-    (realize-step [_ ctx step-fn args]
-      (future (apply step-fn args)))
+    (realize-step [_ ctx]
+      (future (call-step-fn ctx)))
     (step-result [_ step-future]
       (try
         @step-future
@@ -148,13 +151,17 @@
     (step-result-done? [_ step-future]
       (future-done? step-future))))
 
-(defn wrap [strategy middleware]
+(defn wrap-strategy [strategy & middleware]
   (reify Strategy
     Object
     (toString [_] (str strategy))
     Strategy
-    (realize-step [_ ctx step-fn args]
-      (middleware strategy ctx step-fn args))
+    (realize-step [_ ctx]
+      (realize-step strategy
+                    (reduce (fn [ctx mw]
+                              (mw ctx))
+                            ctx
+                            middleware)))
     (step-result [_ step]
       (step-result strategy step))
     (step-result-done? [_ step-ref]
@@ -184,9 +191,12 @@
       (let [[step-name step] (first steps)]
         (if-let [deps (:deps step)]
           (let [step-fn (resolve-step-fn step-name step)
-                ctx     (assoc ctx ::step-name step-name)
                 args    (map (partial step-val strategy ctx) deps)
-                result  (realize-step strategy ctx step-fn args)]
+                ctx     (assoc ctx
+                               ::step-name step-name
+                               ::step-fn step-fn
+                               ::step-args args)
+                result  (realize-step strategy ctx)]
             (recur (-> ctx
                        (update ::steps rest)
                        (assoc-in [::results step-name] result))))

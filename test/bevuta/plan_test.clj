@@ -2,7 +2,8 @@
   (:require [clojure.test :refer :all]
             [bevuta.plan :as p]
             [bevuta.plan.middleware :as pm]
-            [bevuta.other-test-ns :as other]))
+            [bevuta.other-test-ns :as other]
+            [clojure.spec :as s]))
 
 (defn alpha [x y]
   (* 2 (+ x y)))
@@ -86,18 +87,24 @@
 
 (deftest middleware-test []
   (let [log (atom [])]
-    (p/realize (p/wrap p/in-sequence
-                       (fn [strategy ctx step-fn args]
-                         (swap! log conj (::p/step-name ctx))
-                         (p/realize-step strategy ctx step-fn args)))
+    (p/realize (p/wrap-strategy p/in-sequence
+                                (fn [ctx]
+                                  (swap! log conj (::p/step-name ctx))
+                                  (assoc ctx ::test :foo))
+                                (fn [ctx]
+                                  (swap! log conj (::test ctx))
+                                  ctx))
                (p/devise `delta-sum)
                `{beta 2})
-    (is (= `[delta delta-sum] @log))))
+    (is (= `[delta :foo delta-sum :foo] @log))))
 
-(deftest error-ctx-middleware []
+(p/defn boom-depent [boom]
+  ::nope)
+
+(deftest error-context-middleware []
   (try
-    (p/realize (p/wrap p/in-parallel pm/error-context)
-               (p/devise `boom)
+    (p/realize (p/wrap-strategy p/in-parallel pm/error-context)
+               (p/devise `boom-depent)
                {`beta 10})
     (is false)
     (catch Exception e
