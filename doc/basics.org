@@ -1,0 +1,173 @@
+# -*- org-confirm-babel-evaluate: nil; -*-
+
+#+OPTIONS: toc:nil num:nil
+#+PROPERTY: header-args:clojure :exports code :session plan-basics :results value scalar replace :prologue "(try ;)" :epilogue "(catch Exception e (println (str e))))"
+
+* =bevuta/plan= by Example: Basics
+
+  This library provides a dependency based computation mechanism. Its
+  design is heavily influenced by P{ris,lu}matic's Graph and aims to
+  blend well with =clojure.spec=.
+
+  The two central abstractions in =bevuta.plan= are /plans/ and
+  /steps/. Steps are functions which depend on other steps to produce a
+  result. Plans describe a series of steps for reaching a given set of
+  /goals/ which are steps themselves.
+
+  First of all, let's require =bevuta.plan= in our namespace:
+
+  #+BEGIN_SRC clojure
+    (ns basics
+      (:require [bevuta.plan :as p]))
+  #+END_SRC
+
+  A step is a plain (named) function.
+
+  #+BEGIN_SRC clojure
+    (defn alpha [x y]
+      (* 2 (+ x y)))
+  #+END_SRC
+
+
+  Its dependencies can be declared with =bevuta.plan/def=. Their
+  order has to correspond to the argument order. For example, here we
+  declare that the step named =alpha= depends on the results of the
+  steps =gamma= and =delta=. The result of =gamma= will be passed to
+  =alpha= as =x= and the result of =delta= will be passed as =y=.
+
+  #+BEGIN_SRC clojure
+  (p/def alpha
+    :deps [gamma delta])
+  #+END_SRC
+
+  The shortcut =bevuta.plan/defn= allows to define a function and
+  declare its dependencies in one go. Here, the argument names need to
+  correspond to the dependency names. For example, this form is
+  equivalent to the two forms above:
+
+  #+BEGIN_SRC clojure
+    (p/defn alpha [gamma delta]
+      (* 2 (+ gamma delta)))
+  #+END_SRC
+
+  Let's define =gamma= and =delta= as constant steps for now:
+
+  #+BEGIN_SRC clojure
+    (p/defn gamma []
+      3)
+  #+END_SRC
+
+  #+BEGIN_SRC clojure
+    (p/defn delta []
+      5)
+  #+END_SRC
+
+  Now we can /devise/ a plan for reaching the goal =alpha=:
+
+  #+BEGIN_SRC clojure
+    (def alpha-plan
+      (p/devise `alpha))
+  #+END_SRC
+
+  #+RESULTS:
+  : #'basics/alpha-plan
+
+  You can think of a plan as a description of a computation. It tells
+  you what steps you need to take in what order so that you
+  eventually end up with a result for the given goal(s). Devising a
+  plan involves a topological sort of all the given goal's direct and
+  transitive dependencies. Depending on how many steps are involved,
+  it can be an expensive operation, so remembering and re-using a
+  plan once it was devised is a good idea.
+
+  As you may expect, plans can be /realized/. To that end, you need
+  to provide a /strategy/ of how to go about that. The most basic
+  strategy is to realize steps in sequence:
+
+  #+BEGIN_SRC clojure :exports both
+    (p/realize p/in-sequence alpha-plan)
+  #+END_SRC
+
+  As you can see, the result is a map from step names to their
+  respective results. A constant plan like this is pretty boring,
+  though, as it will always produce the same result. Let's replace
+  =delta= by the following definition:
+
+  #+BEGIN_SRC clojure
+    (p/defn delta [beta]
+      (* beta beta))
+  #+END_SRC
+
+  Since we changed =delta='s dependencies, we need to re-devise
+  =alpha-plan=:
+
+  #+BEGIN_SRC clojure
+    (def alpha-plan
+      (p/devise `alpha))
+  #+END_SRC
+
+  Note that this isn't necessary in real code as you would just change
+  the earlier definition of =delta= in place. It's merely an artifact
+  of this being a walkthough.
+
+  Now what happens if we realize =alpha-plan= again? We never defined
+  =beta=! Right, we get an error:
+
+  #+BEGIN_SRC clojure :exports both :results output
+    (p/realize p/in-sequence (do :wat alpha-plan))
+  #+END_SRC
+
+  #+RESULTS:
+  : clojure.lang.ExceptionInfo: Missing plan inputs {:missing (basics/beta)}
+
+  Undefined steps like this are considered /inputs/ to the plan which
+  need to be provided upon realization. Try this:
+
+  #+BEGIN_SRC clojure :exports both
+    (p/realize p/in-sequence alpha-plan {`beta 6})
+  #+END_SRC
+
+  Steps may also depend on steps from other namespaces:
+
+  #+BEGIN_SRC clojure
+    (p/def zeta :deps [es/theta])
+
+    (defn zeta [theta]
+      (/ theta 5))
+  #+END_SRC
+
+  This also works with =bevuta.plan/defn=. The name part of the
+  qualified symbol will serve as the argument name:
+
+  #+BEGIN_SRC clojure :exports both
+    (p/defn zeta [es/theta]
+      (/ theta 5))
+
+    (p/realize p/in-sequence (p/devise `zeta) {`es/theta 10})
+  #+END_SRC
+
+  When you need to depend on multiple steps of the same name from
+  different namespaces, you can use the =::p/dep= destructuring
+  extension to resolve the conflict:
+
+  #+BEGIN_SRC clojure :exports both :results outputh
+    (p/defn zeta [delta {::p/dep es/delta :as other-delta}]
+      (+ delta other-delta))
+
+    (p/realize p/in-sequence (p/devise `zeta) {`es/omega 10 `beta 3})
+  #+END_SRC
+
+  You might wonder at this point why you should bother with all of
+  this if a simple function like this would do the trick just as
+  well:
+
+  #+BEGIN_SRC clojure :exports both
+    (defn alpha* [beta]
+      (alpha (delta beta) (gamma)))
+
+    (alpha* 6)
+  #+END_SRC
+
+  One obvious difference is that you don't get the intermediate
+  results which can be quite handy for debugging. However, there's
+  more. To be continued ...
