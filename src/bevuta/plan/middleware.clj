@@ -1,7 +1,7 @@
 (ns bevuta.plan.middleware
   (:require [bevuta.plan :as p]
             [clojure.tools.logging :as log])
-  (:refer-clojure :exclude [time] ))
+  (:refer-clojure :exclude [time when]))
 
 (defn error-context [continue]
   (fn [ctx]
@@ -28,15 +28,12 @@
           time-ns (- (System/nanoTime) start)]
       (assoc ctx ::time-ns time-ns))))
 
-(defn only [step-names middleware]
-  (let [step-names (if (coll? step-names)
-                     (set step-names)
-                     #{step-names})]
-    (fn [continue]
-      (fn [ctx]
-        (if (contains? step-names (::p/step-name ctx))
-          ((middleware continue) ctx)
-          (continue ctx))))))
+(defn when [pred middleware]
+  (fn [continue]
+    (fn [ctx]
+      (if (pred ctx)
+        ((middleware continue) ctx)
+        (continue ctx)))))
 
 (defn handle-error
   ([handler]

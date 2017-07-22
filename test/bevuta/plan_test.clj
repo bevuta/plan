@@ -135,7 +135,8 @@
                       (continue ctx))))
         result (p/realize (p/wrap-strategy p/in-sequence
                                            (collect loga)
-                                           (pm/only `#{delta gamma} (collect logb)))
+                                           (pm/when (comp `#{delta gamma} ::p/step-name)
+                                             (collect logb)))
                           alpha-plan
                           `{beta 2})]
     (is (= `#{alpha delta gamma} @loga))
