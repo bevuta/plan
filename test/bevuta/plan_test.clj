@@ -86,27 +86,30 @@
       (is (= (ex-data e) {::boom ::boom})))))
 
 (deftest middleware-test []
-  (let [log (atom [])]
-    (p/realize (p/wrap-strategy p/in-parallel
-                                (fn [ctx]
-                                  (swap! log conj (::p/step-name ctx))
-                                  (assoc ctx ::test :foo))
-                                (fn [ctx]
-                                  (swap! log conj (::test ctx))
-                                  ctx))
-               (p/devise `delta-sum)
-               `{beta 2})
-    (is (= `[delta :foo delta-sum :foo] @log))))
+  (let [log (atom [])
+        result (p/realize (p/wrap-strategy p/in-sequence
+                                           (fn [continue]
+                                             (fn [ctx]
+                                               (swap! log conj (::p/step-name ctx))
+                                               (continue (assoc ctx  ::test :foo))))
+                                           (fn [continue]
+                                             (fn [ctx]
+                                               (swap! log conj (::test ctx))
+                                               (continue ctx))))
+                          (p/devise `delta-sum)
+                          `{beta 2})] 
+    (is (= `[delta :foo delta-sum :foo] @log))
+    (is (= [:foo :foo] (->> result meta ::p/results vals (map ::test))))))
 
-(p/defn boom-depent [boom]
+(p/defn boom-dependent [boom]
   ::nope)
 
 (deftest error-context-middleware []
   (try
     (p/realize (p/wrap-strategy p/in-parallel pm/error-context)
-               (p/devise `boom-depent)
+               (p/devise `boom-dependent)
                {`beta 10})
-    (is false)
+    (is false "Didn't throw exception")
     (catch Exception e
       (is (= (::p/step-name (ex-data e)) `boom))
       (is (= (ex-data (.getCause e)) {::boom ::boom})))))

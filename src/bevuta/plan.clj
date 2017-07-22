@@ -2,7 +2,8 @@
   (:refer-clojure :exclude [def defn])
   (:require [clojure.core :as c]
             [clojure.spec :as s]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [bevuta.plan :as p]))
 
 
 ;; Snatched from `clojure.spec` and slightly refactored
@@ -20,6 +21,7 @@
 (c/defn unqualify-symbol [s]
   (symbol (name s)))
 
+;; TODO: Introduce bevuta.plan.step ns
 (s/def ::step-name
   (s/and symbol? (s/conformer qualify-symbol)))
 
@@ -118,10 +120,14 @@
 (defprotocol Strategy
   (realize-step [_ ctx])
   (step-result [_ step-ref])
-  (step-result-done? [_ step-ref]))
+  (step-done? [_ step-ref]))
+
+(defn default-call-step-fn [ctx]
+  (let [{::keys [step-fn step-args]} ctx]
+    (assoc ctx ::value (apply step-fn step-args))))
 
 (defn call-step-fn [ctx]
-  (apply (::step-fn ctx) (::step-args ctx)))
+  ((::call-step-fn ctx default-call-step-fn) ctx))
 
 (def in-sequence
   (reify
@@ -132,7 +138,7 @@
       (call-step-fn ctx))
     (step-result [_ result]
       result)
-    (step-result-done? [_ _]
+    (step-done? [_ _]
       true)))
 
 (def in-parallel
@@ -148,68 +154,73 @@
         ;; TODO: Is this a good idea? ;-)
         (catch java.util.concurrent.ExecutionException e
           (throw (.getCause e)))))
-    (step-result-done? [_ step-future]
+    (step-done? [_ step-future]
       (future-done? step-future))))
 
 (defn wrap-strategy [strategy & middleware]
-  (reify Strategy
-    Object
-    (toString [_] (str strategy))
-    Strategy
-    (realize-step [_ ctx]
-      (realize-step strategy
-                    (reduce (fn [ctx mw]
-                              (mw ctx))
-                            ctx
-                            middleware)))
-    (step-result [_ step]
-      (step-result strategy step))
-    (step-result-done? [_ step-ref]
-      (step-result-done? strategy step-ref))))
+  (let [wrapped-call-step-fn (reduce (fn [continue middleware]
+                                       (middleware continue))
+                                     default-call-step-fn
+                                     (reverse middleware))]
+    (reify Strategy
+      Object
+      (toString [_] (str strategy))
+      Strategy
+      (realize-step [_ ctx]
+        (let [ctx (assoc ctx ::call-step-fn wrapped-call-step-fn)]
+          (realize-step strategy ctx)))
+      (step-result [_ step]
+        (step-result strategy step))
+      (step-done? [_ step-ref]
+        (step-done? strategy step-ref)))))
 
 (defmacro get-or [map key else]
   `(if-let [[_# value#] (find ~map ~key)]
      value#
      ~else))
 
-(defn step-val [strategy ctx step-name]
+(defn dependency-val [strategy ctx step-name]
   (get-or (::inputs ctx)
           step-name
-          (step-result strategy (get-in ctx [::results step-name]))))
+          (::value (step-result strategy (get-in ctx [::results step-name])))))
 
 ;; NOTE: We rely on `map`s laziness here so that steps are actually
-;; only dereferenced when `realize-step` realizes the `args`
+;; only dereferenced when `realize-step` realizes the `step-args`
 ;; sequence. This allows it to defer potentially blocking derefs to
 ;; another thread, for example.
 (c/defn realize-steps [strategy inputs steps]
-  (loop [{::keys [steps inputs results]
-          :as ctx}
+  (loop [{::keys [steps inputs results] :as ctx}
          {::steps steps
           ::inputs inputs
           ::results {}}]
     (if (seq steps)
       (let [[step-name step] (first steps)]
-        (if-let [deps (:deps step)]
-          (let [step-fn (resolve-step-fn step-name step)
-                args    (map (partial step-val strategy ctx) deps)
-                ctx     (assoc ctx
-                               ::step-name step-name
-                               ::step-fn step-fn
-                               ::step-args args)
-                result  (realize-step strategy ctx)]
+        (if-let [step-deps (:deps step)]
+          (let [step-fn   (resolve-step-fn step-name step)
+                step-args (map (partial dependency-val strategy ctx) step-deps)
+                step-ctx  {::step-name step-name
+                           ::step-deps step-deps
+                           ::step-fn   step-fn
+                           ::step-args step-args}
+                result    (realize-step strategy step-ctx)]
             (recur (-> ctx
-                       (update ::steps rest)
-                       (assoc-in [::results step-name] result))))
+                       (assoc-in [::results step-name] result)
+                       (update ::steps rest))))
           (recur (cond-> (update ctx ::steps rest)
                    (not (contains? inputs step-name))
                    (assoc-in [::inputs step-name]
                              (get-or step
                                      :value
                                      (resolve-var step-name)))))))
-      (into inputs
-            (map (fn [[k v]]
-                   [k (step-result strategy v)]))
-            results))))
+      (let [results (into {}
+                          (map (fn [[step-name result]]
+                                 [step-name (step-result strategy result)]))
+                          results)
+            values (into inputs
+                         (map (fn [[step-name result]]
+                                [step-name (::value result)]))
+                         results)]
+        (with-meta values {::results results})))))
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
   (loop [steps ()

@@ -1,7 +1,6 @@
 (ns bevuta.plan.examples.basics
   (:require [bevuta.plan :as p]
-            [bevuta.plan.examples.some-steps :as es]
-            [clojure.spec :as s]))
+            [bevuta.plan.examples.some-steps :as es]))
 
 ;; This library provides a dependency based computation mechanism. Its
 ;; design is heavily influenced by P{ris,lu}matic's Graph and aims to
