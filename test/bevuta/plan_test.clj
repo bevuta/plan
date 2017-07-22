@@ -113,3 +113,13 @@
     (catch Exception e
       (is (= (::p/step-name (ex-data e)) `boom))
       (is (= (ex-data (.getCause e)) {::boom ::boom})))))
+
+(deftest handle-error-middleware []
+  (let [result (p/realize (p/wrap-strategy p/in-parallel
+                                           (pm/handle-error `boom
+                                                            RuntimeException
+                                                            (fn [ctx error]
+                                                              (assoc ctx ::p/value ::no-problem))))
+                          (p/devise `boom-dependent)
+                          {`beta 10})]
+    (is (= (get result `boom) ::no-problem))))
