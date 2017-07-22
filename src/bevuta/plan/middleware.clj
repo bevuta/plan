@@ -28,16 +28,25 @@
           time-ns (- (System/nanoTime) start)]
       (assoc ctx ::time-ns time-ns))))
 
+(defn only [step-names middleware]
+  (let [step-names (if (coll? step-names)
+                     (set step-names)
+                     #{step-names})]
+    (fn [continue]
+      (fn [ctx]
+        (if (contains? step-names (::p/step-name ctx))
+          ((middleware continue) ctx)
+          (continue ctx))))))
+
 (defn handle-error
-  ([step-name handler]
-   (handle-error step-name Throwable handler))
-  ([step-name error-class handler]
+  ([handler]
+   (handle-error Throwable handler))
+  ([error-class handler]
    (fn [continue]
      (fn [ctx]
        (try
          (continue ctx)
          (catch Throwable error
-           (if (and (instance? error-class error)
-                    (= step-name (::p/step-name ctx)))
+           (if (instance? error-class error)
              (handler ctx error)
              (throw error))))))))

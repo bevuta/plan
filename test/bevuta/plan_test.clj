@@ -104,7 +104,7 @@
 (p/defn boom-dependent [boom]
   ::nope)
 
-(deftest error-context-middleware []
+(deftest error-context-middleware-test []
   (try
     (p/realize (p/wrap-strategy p/in-parallel pm/error-context)
                (p/devise `boom-dependent)
@@ -114,12 +114,29 @@
       (is (= (::p/step-name (ex-data e)) `boom))
       (is (= (ex-data (.getCause e)) {::boom ::boom})))))
 
-(deftest handle-error-middleware []
+(deftest handle-error-middleware-test []
   (let [result (p/realize (p/wrap-strategy p/in-parallel
-                                           (pm/handle-error `boom
-                                                            RuntimeException
-                                                            (fn [ctx error]
-                                                              (assoc ctx ::p/value ::no-problem))))
+                                           (pm/handle-error
+                                            RuntimeException
+                                            (fn [ctx error]
+                                              (assoc ctx ::p/value ::no-problem))))
                           (p/devise `boom-dependent)
                           {`beta 10})]
     (is (= (get result `boom) ::no-problem))))
+
+
+(deftest only-middleware-test []
+  (let [loga (atom #{})
+        logb (atom #{})
+        collect (fn [log]
+                  (fn [continue]
+                    (fn [ctx]
+                      (swap! log conj (::p/step-name ctx))
+                      (continue ctx))))
+        result (p/realize (p/wrap-strategy p/in-sequence
+                                           (collect loga)
+                                           (pm/only `#{delta gamma} (collect logb)))
+                          alpha-plan
+                          `{beta 2})]
+    (is (= `#{alpha delta gamma} @loga))
+    (is (= `#{delta gamma} @logb))))
