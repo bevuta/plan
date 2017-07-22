@@ -158,6 +158,9 @@
       (future-done? step-future))))
 
 (defn wrap-strategy [strategy & middleware]
+  ;; TODO: This is flawed because it directly refers to
+  ;; default-call-step-fn which means we can't wrap an already wrapped
+  ;; strategy. Interceptors should make this possible.
   (let [wrapped-call-step-fn (reduce (fn [continue middleware]
                                        (middleware continue))
                                      default-call-step-fn
