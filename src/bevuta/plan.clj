@@ -1,7 +1,7 @@
 (ns bevuta.plan
   (:refer-clojure :exclude [def defn])
   (:require [clojure.core :as c]
-            [clojure.spec :as s]
+            [clojure.spec.alpha :as s]
             [clojure.set :as set]
             [bevuta.interceptors :as i]))
 

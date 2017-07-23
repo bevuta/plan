@@ -1,10 +1,10 @@
 (ns bevuta.plan-test
   (:require [clojure.test :refer :all]
-            [bevuta.plan :as p]
+            [clojure.spec.alpha :as s]
             [bevuta.interceptors :as interceptors]
+            [bevuta.plan :as p]
             [bevuta.plan.interceptors :as pi]
-            [bevuta.other-test-ns :as other]
-            [clojure.spec :as s]))
+            [bevuta.other-test-ns :as other]))
 
 (defn alpha [x y]
   (* 2 (+ x y)))
