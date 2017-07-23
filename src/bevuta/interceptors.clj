@@ -24,9 +24,10 @@
             interceptor-fn (get interceptor interceptor-key)
             ctx' (-> ctx
                      (update ::stack conj interceptor)
-                     (update ::queue next)
-                     (cond->> interceptor-fn
-                       (call-interceptor-fn interceptor-fn)))
+                     (update ::queue next))
+            ctx' (if interceptor-fn
+                   (call-interceptor-fn interceptor-fn ctx')
+                   ctx')
             ctx' (if (and (::error ctx) (::error ctx') interceptor-fn)
                    (update ctx' ::suppressed-errors conj (::error ctx))
                    ctx')]
