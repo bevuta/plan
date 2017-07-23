@@ -13,7 +13,7 @@
       (assoc ::queue (::stack ctx))
       (dissoc ::stack)))
 
-(defn execute-1 [ctx stage]
+(defn execute-stage [ctx stage]
   (loop [ctx (-> ctx
                  (update ::queue seq)
                  (assoc ::stack nil))]
@@ -39,6 +39,6 @@
 
 (defn execute [ctx]
   (-> ctx
-      (execute-1 :enter)
-      (execute-1 :leave)
+      (execute-stage :enter)
+      (execute-stage :leave)
       (dissoc ::queue ::stack ::error)))
