@@ -3,7 +3,7 @@
   (:require [clojure.core :as c]
             [clojure.spec :as s]
             [clojure.set :as set]
-            [bevuta.plan :as p]))
+            [bevuta.interceptors :as i]))
 
 
 ;; Snatched from `clojure.spec` and slightly refactored
@@ -117,60 +117,18 @@
   (or (:fn step)
       (resolve-var step-name)))
 
-(defprotocol Strategy
-  (realize-step [_ ctx])
-  (step-result [_ step-ref])
-  (step-done? [_ step-ref]))
-
 (def step-fn-interceptor
   {:enter (fn [ctx]
             (let [{::keys [step-fn step-args]} ctx]
               (assoc ctx ::value (apply step-fn step-args))))})
 
-(defn call-interceptor-fn [ctx f]
-  (try
-    (if-let [error (::error ctx)]
-      (f (dissoc ctx ::error) error)
-      (f ctx))
-    (catch Throwable exn
-      (assoc ctx ::error exn))))
-
-(defn execute-interceptors [ctx kind]
-  (loop [kind kind
-         ctx (-> ctx
-                 (update ::interceptors seq)
-                 (assoc ::interceptors-stack nil))]
-    (if-let [[interceptor] (::interceptors ctx)]
-      (let [interceptor-fn (get interceptor kind)
-            new-ctx (-> ctx
-                        (update ::interceptors-stack conj interceptor)
-                        (update ::interceptors next)
-                        (cond-> interceptor-fn
-                          (call-interceptor-fn interceptor-fn)))
-            new-ctx (if (::error new-ctx)
-                      (cond-> new-ctx
-                        (::error ctx)
-                        (update ::suppressed-errors conj (::error ctx))
-
-                        (= kind :enter)
-                        (-> (assoc ::interceptors (seq (::interceptors-stack ctx)))
-                            (assoc ::interceptors-stack nil)))
-                      new-ctx)
-            kind (cond (::error new-ctx) :error
-                       (= :error kind) :leave
-                       :else kind)]
-        (recur kind new-ctx))
-      (if (= kind :error)
-        (throw (::error ctx))
-        (-> ctx
-            (assoc ::interceptors (::interceptors-stack ctx))
-            (dissoc ::interceptors-stack
-                    ::error))))))
+(defprotocol Strategy
+  (realize-step [_ ctx])
+  (step-result [_ step-ref])
+  (step-done? [_ step-ref]))
 
 (defn call-step-fn [ctx]
-  (-> ctx
-      (execute-interceptors :enter)
-      (execute-interceptors :leave)))
+  (i/execute ctx))
 
 (def in-sequence
   (reify
@@ -232,7 +190,7 @@
                              ::step-deps    step-deps
                              ::step-fn      step-fn
                              ::step-args    step-args
-                             ::interceptors interceptors}
+                             ::i/queue      interceptors}
                   result    (realize-step strategy step-ctx)]
               (recur (-> ctx
                          (assoc-in [::results step-name] result)

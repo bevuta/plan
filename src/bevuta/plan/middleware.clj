@@ -1,6 +1,7 @@
 (ns bevuta.plan.middleware
   (:require [bevuta.plan :as p]
-            [clojure.tools.logging :as log])
+            [clojure.tools.logging :as log]
+            [bevuta.interceptors :as interceptors])
   (:refer-clojure :exclude [time when]))
 
 (def error-context
@@ -29,7 +30,7 @@
 (defn when [pred & interceptors]
   {:enter (fn [ctx]
             (if (pred ctx)
-              (update ctx ::p/interceptors into interceptors)
+              (update ctx ::interceptors/queue into interceptors)
               ctx))})
 
 (defn handle-error

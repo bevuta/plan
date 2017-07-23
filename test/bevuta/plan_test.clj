@@ -1,6 +1,7 @@
 (ns bevuta.plan-test
   (:require [clojure.test :refer :all]
             [bevuta.plan :as p]
+            [bevuta.interceptors :as interceptors]
             [bevuta.plan.middleware :as pm]
             [bevuta.other-test-ns :as other]
             [clojure.spec :as s]))
@@ -113,7 +114,7 @@
     (catch Exception e
       (let [data (ex-data e)]
         (is (= (dissoc data :ctx) {:no 1}))
-        (is (= (count (::p/suppressed-errors (:ctx data))) 2))))))
+        (is (= (count (::interceptors/suppressed-errors (:ctx data))) 2))))))
 
 (p/defn boom-dependent [boom]
   ::nope)
