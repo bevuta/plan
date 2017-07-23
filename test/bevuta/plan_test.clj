@@ -158,3 +158,11 @@
                           `{beta 2})]
     (is (= `#{alpha delta gamma} @log1))
     (is (= `#{delta gamma} @log2))))
+
+(deftest time-interceptor-test []
+  (let [result (p/realize p/in-sequence
+                          (p/add-interceptors alpha-plan pi/time)
+                          `{beta 2})
+        timings (->> result meta ::p/results vals (map ::pi/time-ns))]
+    (is (seq timings))
+    (is (every? nat-int? timings))))

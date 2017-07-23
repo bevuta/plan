@@ -47,4 +47,5 @@
 (defn execute [ctx]
   (-> ctx
       (execute-1 :enter)
-      (execute-1 :leave)))
+      (execute-1 :leave)
+      (dissoc ::queue ::stack)))
