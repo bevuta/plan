@@ -122,12 +122,55 @@
   (step-result [_ step-ref])
   (step-done? [_ step-ref]))
 
-(defn default-call-step-fn [ctx]
-  (let [{::keys [step-fn step-args]} ctx]
-    (assoc ctx ::value (apply step-fn step-args))))
+(def step-fn-interceptor
+  {:enter (fn [ctx]
+            (let [{::keys [step-fn step-args]} ctx]
+              (assoc ctx ::value (apply step-fn step-args))))})
+
+(defn call-interceptor-fn [ctx f]
+  (try
+    (if-let [error (::error ctx)]
+      (f (dissoc ctx ::error) error)
+      (f ctx))
+    (catch Throwable exn
+      (assoc ctx ::error exn))))
+
+(defn execute-interceptors [ctx kind]
+  (loop [kind kind
+         ctx (-> ctx
+                 (update ::interceptors seq)
+                 (assoc ::interceptors-stack nil))]
+    (if-let [[interceptor] (::interceptors ctx)]
+      (let [interceptor-fn (get interceptor kind)
+            new-ctx (-> ctx
+                        (update ::interceptors-stack conj interceptor)
+                        (update ::interceptors next)
+                        (cond-> interceptor-fn
+                          (call-interceptor-fn interceptor-fn)))
+            new-ctx (if (::error new-ctx)
+                      (cond-> new-ctx
+                        (::error ctx)
+                        (update ::suppressed-errors conj (::error ctx))
+
+                        (= kind :enter)
+                        (-> (assoc ::interceptors (seq (::interceptors-stack ctx)))
+                            (assoc ::interceptors-stack nil)))
+                      new-ctx)
+            kind (cond (::error new-ctx) :error
+                       (= :error kind) :leave
+                       :else kind)]
+        (recur kind new-ctx))
+      (if (= kind :error)
+        (throw (::error ctx))
+        (-> ctx
+            (assoc ::interceptors (::interceptors-stack ctx))
+            (dissoc ::interceptors-stack
+                    ::error))))))
 
 (defn call-step-fn [ctx]
-  ((::call-step-fn ctx default-call-step-fn) ctx))
+  (-> ctx
+      (execute-interceptors :enter)
+      (execute-interceptors :leave)))
 
 (def in-sequence
   (reify
@@ -157,25 +200,8 @@
     (step-done? [_ step-future]
       (future-done? step-future))))
 
-(defn wrap-strategy [strategy & middleware]
-  ;; TODO: This is flawed because it directly refers to
-  ;; default-call-step-fn which means we can't wrap an already wrapped
-  ;; strategy. Interceptors should make this possible.
-  (let [wrapped-call-step-fn (reduce (fn [continue middleware]
-                                       (middleware continue))
-                                     default-call-step-fn
-                                     (reverse middleware))]
-    (reify Strategy
-      Object
-      (toString [_] (str strategy))
-      Strategy
-      (realize-step [_ ctx]
-        (let [ctx (assoc ctx ::call-step-fn wrapped-call-step-fn)]
-          (realize-step strategy ctx)))
-      (step-result [_ step]
-        (step-result strategy step))
-      (step-done? [_ step-ref]
-        (step-done? strategy step-ref)))))
+(defn add-interceptors [plan & interceptors]
+  (update plan ::interceptors (fnil into []) interceptors))
 
 (defmacro get-or [map key else]
   `(if-let [[_# value#] (find ~map ~key)]
@@ -191,39 +217,41 @@
 ;; only dereferenced when `realize-step` realizes the `step-args`
 ;; sequence. This allows it to defer potentially blocking derefs to
 ;; another thread, for example.
-(c/defn realize-steps [strategy inputs steps]
-  (loop [{::keys [steps inputs results] :as ctx}
-         {::steps steps
-          ::inputs inputs
-          ::results {}}]
-    (if (seq steps)
-      (let [[step-name step] (first steps)]
-        (if-let [step-deps (:deps step)]
-          (let [step-fn   (resolve-step-fn step-name step)
-                step-args (map (partial dependency-val strategy ctx) step-deps)
-                step-ctx  {::step-name step-name
-                           ::step-deps step-deps
-                           ::step-fn   step-fn
-                           ::step-args step-args}
-                result    (realize-step strategy step-ctx)]
-            (recur (-> ctx
-                       (assoc-in [::results step-name] result)
-                       (update ::steps rest))))
-          (recur (cond-> (update ctx ::steps rest)
-                   (not (contains? inputs step-name))
-                   (assoc-in [::inputs step-name]
-                             (get-or step
-                                     :value
-                                     (resolve-var step-name)))))))
-      (let [results (into {}
-                          (map (fn [[step-name result]]
-                                 [step-name (step-result strategy result)]))
-                          results)
-            values (into inputs
-                         (map (fn [[step-name result]]
-                                [step-name (::value result)]))
-                         results)]
-        (with-meta values {::results results})))))
+(c/defn realize-steps [strategy inputs {::keys [steps interceptors]}]
+  (let [interceptors (conj interceptors step-fn-interceptor)]
+    (loop [{::keys [steps inputs results] :as ctx}
+           {::steps steps
+            ::inputs inputs
+            ::results {}}]
+      (if (seq steps)
+        (let [[step-name step] (first steps)]
+          (if-let [step-deps (:deps step)]
+            (let [step-fn   (resolve-step-fn step-name step)
+                  step-args (map (partial dependency-val strategy ctx) step-deps)
+                  step-ctx  {::step-name    step-name
+                             ::step-deps    step-deps
+                             ::step-fn      step-fn
+                             ::step-args    step-args
+                             ::interceptors interceptors}
+                  result    (realize-step strategy step-ctx)]
+              (recur (-> ctx
+                         (assoc-in [::results step-name] result)
+                         (update ::steps rest))))
+            (recur (cond-> (update ctx ::steps rest)
+                     (not (contains? inputs step-name))
+                     (assoc-in [::inputs step-name]
+                               (get-or step
+                                       :value
+                                       (resolve-var step-name)))))))
+        (let [results (into {}
+                            (map (fn [[step-name result]]
+                                   [step-name (step-result strategy result)]))
+                            results)
+              values (into inputs
+                           (map (fn [[step-name result]]
+                                  [step-name (::value result)]))
+                           results)]
+          (with-meta values {::results results}))))))
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
   (loop [steps ()
@@ -285,7 +313,7 @@
    (realize strategy plan {}))
   ([strategy plan inputs]
    (let [inputs (validated-inputs (::inputs plan) inputs)]
-     (realize-steps strategy inputs (::steps plan)))))
+     (realize-steps strategy inputs plan))))
 
 (c/defn get-step-spec
   ([step-name step]

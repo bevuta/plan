@@ -85,59 +85,73 @@
     (catch Exception e
       (is (= (ex-data e) {::boom ::boom})))))
 
-(deftest middleware-test []
+(deftest interceptor-test []
   (let [log (atom [])
-        result (p/realize (p/wrap-strategy p/in-sequence
-                                           (fn [continue]
-                                             (fn [ctx]
+        plan (-> (p/devise `delta-sum)
+                 (p/add-interceptors {:enter (fn [ctx]
                                                (swap! log conj (::p/step-name ctx))
-                                               (continue (assoc ctx  ::test :foo))))
-                                           (fn [continue]
-                                             (fn [ctx]
+                                               (assoc ctx ::test :foo))}
+                                     {:enter (fn [ctx]
                                                (swap! log conj (::test ctx))
-                                               (continue ctx))))
-                          (p/devise `delta-sum)
-                          `{beta 2})] 
+                                               ctx)}))
+        result (p/realize p/in-sequence plan `{beta 2})]
     (is (= `[delta :foo delta-sum :foo] @log))
     (is (= [:foo :foo] (->> result meta ::p/results vals (map ::test))))))
+
+(deftest interceptor-error-propagation-test []
+  (try
+    (p/realize p/in-parallel
+               (-> (p/devise `boom)
+                   (p/add-interceptors {:error (fn [ctx error]
+                                                 (throw (ex-info "boom" {:no 1 :ctx ctx})))}
+                                       {:error (fn [ctx error]
+                                                 (throw (ex-info "boom" {:no 2})))}
+                                       {:error (fn [ctx error]
+                                                 (throw (ex-info "boom" {:no 3})))}))
+               {`beta 10})
+    (is false)
+    (catch Exception e
+      (let [data (ex-data e)]
+        (is (= (dissoc data :ctx) {:no 1}))
+        (is (= (count (::p/suppressed-errors (:ctx data))) 2))))))
 
 (p/defn boom-dependent [boom]
   ::nope)
 
-(deftest error-context-middleware-test []
+(deftest error-context-interceptor-test []
   (try
-    (p/realize (p/wrap-strategy p/in-parallel pm/error-context)
-               (p/devise `boom-dependent)
+    (p/realize p/in-sequence
+               (-> (p/devise `boom-dependent)
+                   (p/add-interceptors pm/error-context))
                {`beta 10})
     (is false "Didn't throw exception")
     (catch Exception e
       (is (= (::p/step-name (ex-data e)) `boom))
       (is (= (ex-data (.getCause e)) {::boom ::boom})))))
 
-(deftest handle-error-middleware-test []
-  (let [result (p/realize (p/wrap-strategy p/in-parallel
-                                           (pm/handle-error
-                                            RuntimeException
-                                            (fn [ctx error]
-                                              (assoc ctx ::p/value ::no-problem))))
-                          (p/devise `boom-dependent)
+(deftest handle-error-interceptor-test []
+  (let [result (p/realize p/in-parallel
+                          (-> (p/devise `boom-dependent)
+                              (p/add-interceptors (pm/handle-error
+                                                   RuntimeException
+                                                   (fn [ctx error]
+                                                     (assoc ctx ::p/value ::no-problem)))))
                           {`beta 10})]
     (is (= (get result `boom) ::no-problem))))
 
 
-(deftest only-middleware-test []
-  (let [loga (atom #{})
-        logb (atom #{})
+(deftest when-interceptor-test []
+  (let [log1 (atom #{})
+        log2 (atom #{})
         collect (fn [log]
-                  (fn [continue]
-                    (fn [ctx]
-                      (swap! log conj (::p/step-name ctx))
-                      (continue ctx))))
-        result (p/realize (p/wrap-strategy p/in-sequence
-                                           (collect loga)
-                                           (pm/when (comp `#{delta gamma} ::p/step-name)
-                                             (collect logb)))
-                          alpha-plan
+                  {:enter (fn [ctx]
+                            (swap! log conj (::p/step-name ctx))
+                            ctx)})
+        result (p/realize p/in-sequence
+                          (p/add-interceptors alpha-plan
+                                              (collect log1)
+                                              (pm/when (comp `#{delta gamma} ::p/step-name)
+                                                (collect log2)))
                           `{beta 2})]
-    (is (= `#{alpha delta gamma} @loga))
-    (is (= `#{delta gamma} @logb))))
+    (is (= `#{alpha delta gamma} @log1))
+    (is (= `#{delta gamma} @log2))))
