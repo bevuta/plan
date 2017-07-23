@@ -148,8 +148,10 @@
                   {:enter (fn [ctx]
                             (swap! log conj (::p/step-name ctx))
                             ctx)})
-        result (p/realize p/in-sequence
+        result (p/realize p/in-parallel
                           (p/add-interceptors alpha-plan
+                                              pi/trace
+                                              pi/time
                                               (collect log1)
                                               (pi/when (comp `#{delta gamma} ::p/step-name)
                                                 (collect log2)))

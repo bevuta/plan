@@ -11,21 +11,37 @@
                      ctx
                      error)))})
 
-(defn trace [continue]
-  (fn [ctx]
-    (try
-      (println "-> " (::p/step-name ctx))
-      (continue ctx)
-      (finally
-        (println "<- " (::p/step-name ctx))))))
+(defn rethrowing [f]
+  (fn [ctx error]
+    (f ctx)
+    (throw error)))
 
-(defn time [continue]
-  (fn [ctx]
-    (println "timing" (::p/step-name ctx))
-    (let [start   (System/nanoTime)
-          ctx     (continue ctx)
-          time-ns (- (System/nanoTime) start)]
-      (assoc ctx ::time-ns time-ns))))
+(def time
+  (let [now   #(System/nanoTime)
+        enter (fn [ctx]
+                (assoc ctx ::time-start (now)))
+        leave (fn [ctx]
+                (-> ctx
+                    (assoc ::time-ns (- (now) (::time-start ctx)))
+                    (dissoc ::time-start)))]
+    {:enter enter
+     :error (rethrowing leave)
+     :leave leave}))
+
+(def trace
+  (let [leave (fn [prefix]
+                (fn [ctx]
+                  (log/trace prefix
+                             (::p/step-name ctx)
+                             (if-let [time-ns (::time-ns ctx)]
+                               (str "(" time-ns " ns)")
+                               ""))
+                  ctx))]
+    {:enter (fn [ctx]
+              (log/trace "->" (::p/step-name ctx))
+              ctx)
+     :error (rethrowing (leave "<- ERROR"))
+     :leave (leave "<-")}))
 
 (defn when [pred & interceptors]
   {:enter (fn [ctx]
