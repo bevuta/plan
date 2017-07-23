@@ -2,7 +2,7 @@
   (:require [clojure.test :refer :all]
             [bevuta.plan :as p]
             [bevuta.interceptors :as interceptors]
-            [bevuta.plan.middleware :as pm]
+            [bevuta.plan.interceptors :as pi]
             [bevuta.other-test-ns :as other]
             [clojure.spec :as s]))
 
@@ -123,7 +123,7 @@
   (try
     (p/realize p/in-sequence
                (-> (p/devise `boom-dependent)
-                   (p/add-interceptors pm/error-context))
+                   (p/add-interceptors pi/error-context))
                {`beta 10})
     (is false "Didn't throw exception")
     (catch Exception e
@@ -133,7 +133,7 @@
 (deftest handle-error-interceptor-test []
   (let [result (p/realize p/in-parallel
                           (-> (p/devise `boom-dependent)
-                              (p/add-interceptors (pm/handle-error
+                              (p/add-interceptors (pi/handle-error
                                                    RuntimeException
                                                    (fn [ctx error]
                                                      (assoc ctx ::p/value ::no-problem)))))
@@ -151,7 +151,7 @@
         result (p/realize p/in-sequence
                           (p/add-interceptors alpha-plan
                                               (collect log1)
-                                              (pm/when (comp `#{delta gamma} ::p/step-name)
+                                              (pi/when (comp `#{delta gamma} ::p/step-name)
                                                 (collect log2)))
                           `{beta 2})]
     (is (= `#{alpha delta gamma} @log1))

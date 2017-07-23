@@ -1,7 +1,7 @@
-(ns bevuta.plan.middleware
+(ns bevuta.plan.interceptors
   (:require [bevuta.plan :as p]
-            [clojure.tools.logging :as log]
-            [bevuta.interceptors :as interceptors])
+            [bevuta.interceptors :as interceptors]
+            [clojure.tools.logging :as log])
   (:refer-clojure :exclude [time when]))
 
 (def error-context
