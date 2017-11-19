@@ -220,10 +220,10 @@
       [steps visited inputs]
       (let [dep (first deps)]
         (if (contains? visited dep)
-          (recur steps
-                 visited
+          (recur (remove #(= dep (key %)) steps)
+                 (disj visited dep)
                  inputs
-                 (rest deps))
+                 deps)
           (if-let [dep-step (or (find overrides dep)
                                 (find all-steps dep))]
             (recur (conj steps dep-step)

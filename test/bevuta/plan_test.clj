@@ -76,6 +76,23 @@
               other/delta 8
               delta-sum 12})))
 
+
+(p/defn shared-step [beta]
+  (* beta 2))
+
+(p/defn sharing-step1 [shared-step]
+  (inc shared-step))
+
+(p/defn sharing-step2 [shared-step sharing-step1]
+  (+ shared-step sharing-step1))
+
+(deftest dependency-shared-by-dependency []
+  (is (= (p/realize p/in-sequence (p/devise `sharing-step2) `{beta 3})
+         `#::{beta 3
+              shared-step 6
+              sharing-step1 7
+              sharing-step2 13})))
+
 (p/defn boom [beta]
   (throw (ex-info "boom" {::boom ::boom})))
 
