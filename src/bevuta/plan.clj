@@ -79,7 +79,7 @@
 (defmacro def
   [step-name & definition]
   (let [step-name (s/conform ::step-name step-name)
-        step (s/conform ::step* definition)]
+        step (or (s/conform ::step* definition) {})]
     `(swap! step-registry
             assoc
             '~step-name
@@ -115,9 +115,9 @@
     (throw (ex-info (str "Unable to resolve var " var-name)
                     {:name var-name}))))
 
-(c/defn resolve-step-fn [step-name step]
+(c/defn resolve-step-fn [step]
   (or (:fn step)
-      (resolve-var (or (:alias step) step-name))))
+      (resolve-var (or (:alias step) (:name step)))))
 
 (def step-fn-interceptor
   {:enter (fn [ctx]
@@ -184,9 +184,10 @@
             ::inputs inputs
             ::results {}}]
       (if (seq steps)
-        (let [[step-name step] (first steps)]
+        (let [step (first steps)
+              step-name (:name step)]
           (if-let [step-deps (:deps step)]
-            (let [step-fn   (resolve-step-fn step-name step)
+            (let [step-fn   (resolve-step-fn step)
                   step-args (map (partial dependency-val strategy ctx) step-deps)
                   step-ctx  {::step-name    step-name
                              ::step-deps    step-deps
@@ -213,17 +214,16 @@
                            results)]
           (with-meta values {::results results}))))))
 
-(c/defn resolve-step-alias [[step-name step] all-steps]
-  (clojure.lang.MapEntry.
-   step-name
-   (loop [alias (:alias step)
-          step step]
-     (if alias
-       (let [step' (get all-steps alias)]
-         (recur (:alias step') (merge step step')))
-       step))))
+(c/defn resolve-step-alias [step all-steps]
+  (loop [alias (:alias step)
+         step step]
+    (if alias
+      (let [step' (get all-steps alias)]
+        (recur (:alias step') (merge step step')))
+      step)))
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
+  
   (loop [steps ()
          visited visited
          inputs inputs
@@ -232,18 +232,20 @@
       [steps visited inputs]
       (let [dep (first deps)]
         (if (contains? visited dep)
-          (recur (remove #(= dep (key %)) steps)
+          ;; TODO: Make removal more efficient or unnecessary to begin with
+          (recur (remove #(= dep (:name %)) steps)
                  (disj visited dep)
                  inputs
                  deps)
-          (if-let [dep-step (some-> (or (find overrides dep)
-                                        (find all-steps dep))
+          (if-let [dep-step (some-> (or (get overrides dep)
+                                        (get all-steps dep))
+                                    (assoc :name dep)
                                     (resolve-step-alias all-steps))]
             (recur (conj steps dep-step)
                    (conj visited dep)
                    inputs
                    (concat (rest deps)
-                           (-> dep-step val :deps)))
+                           (:deps dep-step)))
             (recur steps
                    (conj visited dep)
                    (conj inputs dep)
@@ -286,13 +288,10 @@
    (let [inputs (validated-inputs (::inputs plan) inputs)]
      (realize-steps strategy inputs plan))))
 
-(c/defn get-step-spec
-  ([step-name step]
-   (or (:spec step)
-       (when-let [s (s/get-spec step-name)]
-         (or (:ret s) s))))
-  ([[step-name step]]
-   (get-step-spec step-name step)))
+(c/defn get-step-spec [step]
+  (or (:spec step)
+      (when-let [s (s/get-spec (:name step))]
+        (or (:ret s) s))))
 
 (defmacro fdefs []
   (let [all-steps @step-registry
@@ -302,22 +301,24 @@
                       (filter all-steps))
         ns-plan (devise ns-steps)
         ns-step-specs (->> (::inputs ns-plan)
-                           (map (juxt identity (partial get all-steps)))
+                           (map (fn [input]
+                                  (assoc (get input all-steps) :name input)))
                            (concat (::steps ns-plan))
-                           (map (juxt first get-step-spec))
+                           (map (juxt :name get-step-spec))
                            (into {}))]
     (when-let [missing (->> ns-step-specs (remove val) (map first) seq)]
       (throw (ex-info "Missing specs for some steps"
                       {:steps missing})))
     `(do
        ~@(->> (::steps ns-plan)
-              (filter (comp :deps second))
-              (map (fn [[step-name step]]
-                     `(s/fdef ~step-name
-                              :args (s/cat ~@(mapcat (fn [dep-name]
-                                                       [(keyword (str dep-name))
-                                                        (get ns-step-specs dep-name)])
-                                                     (:deps step)))
-                              ~@(when-let [fn-spec (:fn (s/get-spec step-name))]
-                                  [:fn fn-spec])
-                              :ret ~(get ns-step-specs step-name))))))))
+              (filter :deps)
+              (map (fn [step]
+                     (let [step-name (:name step)]
+                       `(s/fdef ~step-name
+                          :args (s/cat ~@(mapcat (fn [dep-name]
+                                                   [(keyword (str dep-name))
+                                                    (get ns-step-specs dep-name)])
+                                                 (:deps step)))
+                          ~@(when-let [fn-spec (:fn (s/get-spec step-name))]
+                              [:fn fn-spec])
+                          :ret ~(get ns-step-specs step-name)))))))))
