@@ -177,10 +177,10 @@
 ;; only dereferenced when `realize-step` realizes the `step-args`
 ;; sequence. This allows it to defer potentially blocking derefs to
 ;; another thread, for example.
-(c/defn realize-steps [strategy inputs {::keys [steps interceptors]}]
-  (let [interceptors (conj interceptors step-fn-interceptor)]
+(c/defn realize-steps [strategy inputs plan]
+  (let [interceptors (conj (::interceptors plan) step-fn-interceptor)]
     (loop [{::keys [steps inputs results] :as ctx}
-           {::steps steps
+           {::steps (::steps plan)
             ::inputs inputs
             ::results {}}]
       (if (seq steps)
