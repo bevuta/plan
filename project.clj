@@ -5,5 +5,4 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.9.0"]
                  [org.clojure/tools.logging "0.4.0"]]
-  :profiles {:dev {:dependencies [[org.clojure/test.check "0.9.0"]]
-                   :source-paths ["examples"]}})
+  :profiles {:dev {:dependencies [[org.clojure/test.check "0.9.0"]]}})
