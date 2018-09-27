@@ -6,6 +6,8 @@
             [bevuta.plan.interceptors :as pi]
             [bevuta.other-test-ns :as other]))
 
+(s/check-asserts true)
+
 (defn alpha [x y]
   (* 2 (+ x y)))
 
@@ -17,7 +19,6 @@
 
 (p/defn delta [beta]
   (* beta beta))
-
 
 (def alpha-plan
   (p/devise `alpha))
@@ -60,6 +61,14 @@
          `#::{delta 3
               gamma 4
               alpha 14})))
+
+(deftest devise-plan-with-alias-override-test []
+  (is (= (p/realize p/in-sequence (p/devise `{delta {:alias zeta}}
+                                            `alpha))
+         `#::{delta 9
+              other/theta 18
+              gamma 3
+              alpha 24})))
 
 (deftest dependencies-across-namespaces-test []
   (doseq [[desc goal] {"with def" `zeta

@@ -34,8 +34,10 @@
 
 (s/def ::value any?)
 
+(s/def ::alias ::step-name)
+
 (s/def ::step
-  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps))]))
+  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps) ::alias)]))
 
 (s/def ::step*
   (s/keys* :opt-un [::deps]))
@@ -115,7 +117,7 @@
 
 (c/defn resolve-step-fn [step-name step]
   (or (:fn step)
-      (resolve-var step-name)))
+      (resolve-var (or (:alias step) step-name))))
 
 (def step-fn-interceptor
   {:enter (fn [ctx]
@@ -211,6 +213,16 @@
                            results)]
           (with-meta values {::results results}))))))
 
+(c/defn resolve-step-alias [[step-name step] all-steps]
+  (clojure.lang.MapEntry.
+   step-name
+   (loop [alias (:alias step)
+          step step]
+     (if alias
+       (let [step' (get all-steps alias)]
+         (recur (:alias step') (merge step step')))
+       step))))
+
 (c/defn devise-1 [all-steps overrides visited inputs goal]
   (loop [steps ()
          visited visited
@@ -224,8 +236,9 @@
                  (disj visited dep)
                  inputs
                  deps)
-          (if-let [dep-step (or (find overrides dep)
-                                (find all-steps dep))]
+          (if-let [dep-step (some-> (or (find overrides dep)
+                                        (find all-steps dep))
+                                    (resolve-step-alias all-steps))]
             (recur (conj steps dep-step)
                    (conj visited dep)
                    inputs
