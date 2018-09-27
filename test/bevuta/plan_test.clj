@@ -62,13 +62,23 @@
               gamma 4
               alpha 14})))
 
+
+(def ^:dynamic invocation-count)
+
+(p/defn invocation-counting-step []
+  (swap! invocation-count inc)
+  10)
+
 (deftest devise-plan-with-alias-override-test []
-  (is (= (p/realize p/in-sequence (p/devise `{delta {:alias zeta}}
-                                            `alpha))
-         `#::{delta 9
-              other/theta 18
-              gamma 3
-              alpha 24})))
+  (binding [invocation-count (atom 0)]
+    (is (= (p/realize p/in-sequence (p/devise `{delta {:alias invocation-counting-step}
+                                                gamma {:alias invocation-counting-step}}
+                                              `alpha))
+           `#::{invocation-counting-step 10
+                delta 10
+                gamma 10
+                alpha 40}))
+    (is (= 1 @invocation-count))))
 
 (deftest dependencies-across-namespaces-test []
   (doseq [[desc goal] {"with def" `zeta

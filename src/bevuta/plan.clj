@@ -117,7 +117,7 @@
 
 (c/defn resolve-step-fn [step]
   (or (:fn step)
-      (resolve-var (or (:alias step) (:name step)))))
+      (resolve-var (:name step))))
 
 (def step-fn-interceptor
   {:enter (fn [ctx]
@@ -215,12 +215,11 @@
           (with-meta values {::results results}))))))
 
 (c/defn resolve-step-alias [step all-steps]
-  (loop [alias (:alias step)
-         step step]
-    (if alias
-      (let [step' (get all-steps alias)]
-        (recur (:alias step') (merge step step')))
-      step)))
+  (if-let [alias (:alias step)]
+    (assoc step
+           :deps [alias]
+           :fn identity)
+    step))
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
   
