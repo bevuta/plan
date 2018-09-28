@@ -1,7 +1,7 @@
 # -*- org-confirm-babel-evaluate: nil; -*-
 
 #+OPTIONS: toc:nil num:nil
-#+PROPERTY: header-args:clojure :exports code :session plan-basics :results value scalar replace :prologue "(try ;)" :epilogue "(catch Exception e (println (str e))))"
+#+PROPERTY: header-args:clojure :exports code :session plan-basics :results value scalar replace
 
 * =bevuta/plan= by Example: Basics
 
@@ -23,7 +23,7 @@
 
   A step is a plain (named) function.
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (defn alpha [x y]
       (* 2 (+ x y)))
   #+END_SRC
@@ -35,7 +35,7 @@
   steps =gamma= and =delta=. The result of =gamma= will be passed to
   =alpha= as =x= and the result of =delta= will be passed as =y=.
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
   (p/def alpha
     :deps [gamma delta])
   #+END_SRC
@@ -45,26 +45,26 @@
   correspond to the dependency names. For example, this form is
   equivalent to the two forms above:
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (p/defn alpha [gamma delta]
       (* 2 (+ gamma delta)))
   #+END_SRC
 
   Let's define =gamma= and =delta= as constant steps for now:
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (p/defn gamma []
       3)
   #+END_SRC
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (p/defn delta []
       5)
   #+END_SRC
 
   We can then /devise/ a plan for reaching the goal =alpha=:
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (def alpha-plan
       (p/devise `alpha))
   #+END_SRC
@@ -81,7 +81,7 @@
   to provide a /strategy/ of how to go about that. The most basic
   strategy is to realize steps in sequence:
 
-  #+BEGIN_SRC clojure :exports both
+  #+BEGIN_SRC clojure :ns basics :exports both
     (p/realize p/in-sequence alpha-plan)
   #+END_SRC
 
@@ -90,7 +90,7 @@
   though, as it will always produce the same result. Let's replace
   =delta= by the following definition:
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (p/defn delta [beta]
       (* beta beta))
   #+END_SRC
@@ -98,7 +98,7 @@
   Since we changed =delta='s dependencies, we need to re-devise
   =alpha-plan=:
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (def alpha-plan
       (p/devise `alpha))
   #+END_SRC
@@ -109,14 +109,14 @@
   Now what happens if we realize =alpha-plan= again? We never defined
   =beta=! Right, we get an error:
 
-  #+BEGIN_SRC clojure :exports both :results output
+  #+BEGIN_SRC clojure :ns basics :exports both :results output
     (p/realize p/in-sequence alpha-plan)
   #+END_SRC
 
   Undefined steps like this are considered /inputs/ to the plan which
   need to be provided upon realization. Try this:
 
-  #+BEGIN_SRC clojure :exports both
+  #+BEGIN_SRC clojure :ns basics :exports both
     (p/realize p/in-sequence alpha-plan {`beta 6})
   #+END_SRC
 
@@ -130,7 +130,7 @@
 
   And in it we define some steps:
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns another
     (p/defn delta [omega]
       (- omega 20))
 
@@ -147,7 +147,7 @@
 
   And we may depend on steps from =another=, too:
 
-  #+BEGIN_SRC clojure
+  #+BEGIN_SRC clojure :ns basics
     (p/def zeta :deps [a/theta])
 
     (defn zeta [theta]
@@ -157,7 +157,7 @@
   This also works with =bevuta.plan/defn=. The name part of the
   qualified symbol will serve as the argument name:
 
-  #+BEGIN_SRC clojure :exports both
+  #+BEGIN_SRC clojure :ns basics :exports both
     (p/defn zeta [a/theta]
       (/ theta 5))
 
@@ -168,7 +168,7 @@
   different namespaces, you can use the =::p/dep= destructuring
   extension to resolve the conflict:
 
-  #+BEGIN_SRC clojure :exports both
+  #+BEGIN_SRC clojure :ns basics :exports both
     (p/defn tau [delta {::p/dep a/delta :as other-delta}]
       (+ delta other-delta))
 
@@ -179,7 +179,7 @@
   this if a simple function like this would do the trick just as
   well:
 
-  #+BEGIN_SRC clojure :exports both :results output
+  #+BEGIN_SRC clojure :ns basics :exports both :results output
     (defn alpha* [beta]
       (alpha (delta beta) (gamma)))
 
