@@ -33,7 +33,7 @@
 (p/defn delta-sum [delta {::p/dep other/delta :as other-delta}]
   (+ delta other-delta))
 
-(deftest realize-plan-strategies-test []
+(deftest realize-plan-strategies-test
   (doseq [[desc strategy] {"in sequence" p/in-sequence
                            "in parallel" p/in-parallel}]
     (testing desc
@@ -43,18 +43,18 @@
                   delta 36
                   gamma 3})))))
 
-(deftest realize-multiple-goals-test []
+(deftest realize-multiple-goals-test
   (is (= (p/realize p/in-sequence (p/devise `[gamma other/delta]))
          `#::{gamma 3
               other/delta 8})))
 
-(deftest realize-with-missing-inputs-test []
+(deftest realize-with-missing-inputs-test
   (let [e (try (p/realize p/in-sequence alpha-plan)
                (catch Exception e [::thrown e]))]
     (is (= (first e) ::thrown))
     (is (= (ex-data (second e)) {:missing [`beta]}))))
 
-(deftest devise-plan-with-overrides-test []
+(deftest devise-plan-with-overrides-test
   (is (= (p/realize p/in-sequence (p/devise `{delta {:value 3}
                                               gamma {:deps [delta] :fn ~inc}}
                                             `alpha))
@@ -69,7 +69,7 @@
   (swap! invocation-count inc)
   10)
 
-(deftest devise-plan-with-alias-override-test []
+(deftest devise-plan-with-alias-override-test
   (binding [invocation-count (atom 0)]
     (is (= (p/realize p/in-sequence (p/devise `{delta {:alias invocation-counting-step}
                                                 gamma {:alias invocation-counting-step}}
@@ -117,7 +117,7 @@
              {`other/theta 18
               goal 9})))))
 
-(deftest dependencies-via-destructuring-syntax-test []
+(deftest dependencies-via-destructuring-syntax-test
   (is (= (p/realize p/in-sequence (p/devise `delta-sum) `{beta 2})
          `#::{beta 2
               delta 4
@@ -134,7 +134,7 @@
 (p/defn sharing-step2 [shared-step sharing-step1]
   (+ shared-step sharing-step1))
 
-(deftest dependency-shared-by-dependency []
+(deftest dependency-shared-by-dependency
   (is (= (p/realize p/in-sequence (p/devise `sharing-step2) `{beta 3})
          `#::{beta 3
               shared-step 6
@@ -144,14 +144,14 @@
 (p/defn boom [beta]
   (throw (ex-info "boom" {::boom ::boom})))
 
-(deftest error-handling-test []
+(deftest error-handling-test
   (try
     (p/realize p/in-sequence (p/devise `boom) {`beta 10})
     (is false)
     (catch Exception e
       (is (= (ex-data e) {::boom ::boom})))))
 
-(deftest interceptor-test []
+(deftest interceptor-test
   (let [log (atom [])
         plan (-> (p/devise `delta-sum)
                  (p/add-interceptors {:enter (fn [ctx]
@@ -164,7 +164,7 @@
     (is (= `[delta :foo delta-sum :foo] @log))
     (is (= [:foo :foo] (->> result meta ::p/results vals (map ::test))))))
 
-(deftest interceptor-error-propagation-test []
+(deftest interceptor-error-propagation-test
   (try
     (p/realize p/in-parallel
                (-> (p/devise `boom)
@@ -184,7 +184,7 @@
 (p/defn boom-dependent [boom]
   ::nope)
 
-(deftest error-context-interceptor-test []
+(deftest error-context-interceptor-test
   (try
     (p/realize p/in-sequence
                (-> (p/devise `boom-dependent)
@@ -195,7 +195,7 @@
       (is (= (::p/step-name (ex-data e)) `boom))
       (is (= (ex-data (.getCause e)) {::boom ::boom})))))
 
-(deftest handle-error-interceptor-test []
+(deftest handle-error-interceptor-test
   (let [result (p/realize p/in-parallel
                           (-> (p/devise `boom-dependent)
                               (p/add-interceptors (pi/handle-error
@@ -206,7 +206,7 @@
     (is (= (get result `boom) ::no-problem))))
 
 
-(deftest when-interceptor-test []
+(deftest when-interceptor-test
   (let [log1 (atom #{})
         log2 (atom #{})
         collect (fn [log]
@@ -224,7 +224,7 @@
     (is (= `#{alpha delta gamma} @log1))
     (is (= `#{delta gamma} @log2))))
 
-(deftest time-interceptor-test []
+(deftest time-interceptor-test
   (let [result (p/realize p/in-sequence
                           (p/add-interceptors alpha-plan pi/time)
                           `{beta 2})
