@@ -36,8 +36,14 @@
 
 (s/def ::alias ::step-name)
 
+(s/def ::inject
+  (s/and (s/or :anonymous (s/keys :req-un [::fn]
+                                  :opt-un [::deps])
+               :named ::step-name)
+         (s/conformer val)))
+
 (s/def ::step
-  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps) ::alias)]))
+  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps) ::alias ::inject)]))
 
 (s/def ::step*
   (s/keys* :opt-un [::deps]))
@@ -221,8 +227,18 @@
            :fn identity)
     step))
 
+(defn inject-deps [step injections]
+  (cond-> step
+    (contains? step :deps)
+    (update :deps (fn [deps]
+                    (mapv (fn [dep]
+                            (let [injection (get injections dep)]
+                              (or (when-not (= injection (:name step))
+                                    injection)
+                                  dep)))
+                          deps)))))
+
 (c/defn devise-1 [all-steps overrides visited inputs goal]
-  
   (loop [steps ()
          visited visited
          inputs inputs
@@ -236,10 +252,11 @@
                  (disj visited dep)
                  inputs
                  deps)
-          (if-let [dep-step (some-> (or (get overrides dep)
+          (if-let [dep-step (some-> (or (get-in overrides [:steps dep])
                                         (get all-steps dep))
                                     (assoc :name dep)
-                                    (resolve-step-alias all-steps))]
+                                    (resolve-step-alias all-steps)
+                                    (inject-deps (:injections overrides)))]
             (recur (conj steps dep-step)
                    (conj visited dep)
                    inputs
@@ -250,15 +267,25 @@
                    (conj inputs dep)
                    (rest deps))))))))
 
+(defn split-overrides [overrides]
+  (reduce (fn [result [step-name override]]
+            (if-let [inject (:inject override)]
+              (update result :injections assoc step-name inject)
+              (update result :steps assoc step-name override)))
+          {:steps {}
+           :injections {}}
+          overrides))
+
 ;; TODO: Or (also) detect cycles here?
 ;; TODO: Fail when goals contain (only?) inputs?
 (c/defn devise
   ([goals]
    (devise {} goals))
   ([overrides goals]
-   (let [overrides (asserting-conform ::overrides overrides)
-         all-goals (asserting-conform ::goals goals)
-         all-steps @step-registry]
+   (let [overrides   (asserting-conform ::overrides overrides)
+         overrides'  (split-overrides overrides)
+         all-goals   (asserting-conform ::goals goals)
+         all-steps   @step-registry]
      (loop [steps   ()
             inputs  #{}
             visited #{}
@@ -268,7 +295,11 @@
              :goals all-goals
              :overrides overrides
              :steps steps}
-         (let [[steps' visited inputs] (devise-1 all-steps overrides visited inputs (first goals))]
+         (let [[steps' visited inputs] (devise-1 all-steps
+                                                 overrides'
+                                                 visited
+                                                 inputs
+                                                 (first goals))]
            (recur (concat steps steps')
                   inputs
                   visited
