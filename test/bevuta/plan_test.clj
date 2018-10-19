@@ -83,7 +83,7 @@
 (p/defn double-zeta-gamma [zeta gamma]
   (* 2 gamma zeta))
 
-(deftest inject-step-override-test
+(deftest inject-named-step-override-test
   (is (= (p/realize p/in-sequence
                     (p/devise `{gamma {:inject double-zeta-gamma}}
                               `alpha)
@@ -96,7 +96,7 @@
               double-zeta-gamma 54
               alpha 116})))
 
-(deftest inject-update-value-override-test
+(deftest inject-anonymous-step-override-test
   (let [plan (p/devise `{gamma {:inject {:fn ~inc}}}
                        `alpha)
         injected-step (some :injected-step (::p/steps plan))]
