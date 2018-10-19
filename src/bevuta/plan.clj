@@ -37,10 +37,9 @@
 (s/def ::alias ::step-name)
 
 (s/def ::inject
-  (s/and (s/or :anonymous (s/keys :req-un [::fn]
-                                  :opt-un [::deps])
-               :named ::step-name)
-         (s/conformer val)))
+  (s/or :anonymous (s/keys :req-un [::fn]
+                           :opt-un [::deps])
+        :named ::step-name))
 
 (s/def ::step
   (s/keys :req-un [(or ::deps ::value (and ::fn ::deps) ::alias ::inject)]))
@@ -227,16 +226,20 @@
            :fn identity)
     step))
 
-(defn inject-deps [step injections]
-  (cond-> step
-    (contains? step :deps)
-    (update :deps (fn [deps]
-                    (mapv (fn [dep]
-                            (let [injection (get injections dep)]
-                              (or (when-not (= injection (:name step))
-                                    injection)
-                                  dep)))
-                          deps)))))
+(defn apply-injections [step injections]
+  (let [injected-step (get injections (:name step))]
+    (cond-> step
+      injected-step
+      (assoc :injected-step injected-step)
+
+      (contains? step :deps)
+      (update :deps (fn [deps]
+                      (mapv (fn [dep]
+                              (or (when-let [injected-dep (get injections dep)]
+                                    (when-not (= injected-dep (:name step))
+                                      injected-dep))
+                                  dep))
+                            deps))))))
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
   (loop [steps ()
@@ -252,26 +255,43 @@
                  (disj visited dep)
                  inputs
                  deps)
-          (if-let [dep-step (some-> (or (get-in overrides [:steps dep])
-                                        (get all-steps dep))
-                                    (assoc :name dep)
-                                    (resolve-step-alias all-steps)
-                                    (inject-deps (:injections overrides)))]
-            (recur (conj steps dep-step)
-                   (conj visited dep)
-                   inputs
-                   (concat (rest deps)
-                           (:deps dep-step)))
-            (recur steps
-                   (conj visited dep)
-                   (conj inputs dep)
-                   (rest deps))))))))
+          (let [original-step (get all-steps dep)
+                override-step (get-in overrides [:steps dep])]
+            (if-let [dep-step (some-> (or override-step
+                                          original-step)
+                                      (assoc :name dep)
+                                      (resolve-step-alias all-steps)
+                                      (apply-injections (:injections overrides)))]
+              (recur (conj steps dep-step)
+                     (conj visited dep)
+                     inputs
+                     (concat (rest deps)
+                             (:deps dep-step)))
+              (recur steps
+                     (conj visited dep)
+                     (conj inputs dep)
+                     (rest deps)))))))))
 
-(defn split-overrides [overrides]
+(defn expand-overrides [overrides]
   (reduce (fn [result [step-name override]]
-            (if-let [inject (:inject override)]
-              (update result :injections assoc step-name inject)
-              (update result :steps assoc step-name override)))
+            (let [[inject-kind inject] (:inject override)
+                  injected-step-name (some-> inject-kind
+                                             (case :named inject
+                                                   :anonymous (gensym (str step-name "-inject"))))
+                  inject (some-> inject-kind
+                                 (case :named inject
+                                       :anonymous (cond-> inject
+                                                    (not (contains? inject :deps))
+                                                    (assoc :deps [step-name]))))]
+              (cond-> result
+                (nil? inject)
+                (update :steps assoc step-name (assoc override :override? true))
+
+                (some? inject)
+                (update :injections assoc step-name injected-step-name)
+
+                (= :anonymous inject-kind)
+                (update :steps assoc injected-step-name inject))))
           {:steps {}
            :injections {}}
           overrides))
@@ -282,8 +302,9 @@
   ([goals]
    (devise {} goals))
   ([overrides goals]
-   (let [overrides   (asserting-conform ::overrides overrides)
-         overrides'  (split-overrides overrides)
+   (let [overrides'   (->> overrides
+                           (asserting-conform ::overrides)
+                           (expand-overrides))
          all-goals   (asserting-conform ::goals goals)
          all-steps   @step-registry]
      (loop [steps   ()

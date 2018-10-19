@@ -80,16 +80,6 @@
                 alpha 40}))
     (is (= 1 @invocation-count))))
 
-(comment
-  (deftest inject-update-value-override-test
-    (is (= (p/realize p/in-sequence
-                      (p/devise `{gamma {:inject {:fn ~inc}}}
-                                `alpha)
-                      `{beta 2})
-           `#::{delta 4
-                gamma 4
-                alpha 16}))))
-
 (p/defn double-zeta-gamma [zeta gamma]
   (* 2 gamma zeta))
 
@@ -106,7 +96,20 @@
               double-zeta-gamma 54
               alpha 116})))
 
-(deftest dependencies-across-namespaces-test []
+(deftest inject-update-value-override-test
+  (let [plan (p/devise `{gamma {:inject {:fn ~inc}}}
+                       `alpha)
+        injected-step (some :injected-step (::p/steps plan))]
+    (is (= (p/realize p/in-sequence
+                      plan
+                      `{beta 2})
+           `#::{beta 2
+                delta 4
+                gamma 3
+                ~injected-step 4
+                alpha 16}))))
+
+(deftest dependencies-across-namespaces-test
   (doseq [[desc goal] {"with def" `zeta
                        "with defn" `zeta2}]
     (testing desc
