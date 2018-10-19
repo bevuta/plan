@@ -80,7 +80,6 @@
         :args (s/cat :name ::step-name
                      :step ::step*))
 
-;; TODO: Detect cycles here?
 (defmacro def
   [step-name & definition]
   (let [step-name (s/conform ::step-name step-name)
@@ -296,7 +295,7 @@
            :injections {}}
           overrides))
 
-;; TODO: Or (also) detect cycles here?
+;; TODO: Detect cycles
 ;; TODO: Fail when goals contain (only?) inputs?
 (c/defn devise
   ([goals]
