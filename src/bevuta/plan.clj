@@ -133,7 +133,7 @@
   (step-result [_ step-ref])
   (step-done? [_ step-ref]))
 
-(defn call-step-fn [ctx]
+(c/defn call-step-fn [ctx]
   (i/execute ctx))
 
 (def in-sequence
@@ -164,7 +164,7 @@
     (step-done? [_ step-future]
       (future-done? step-future))))
 
-(defn add-interceptors [plan & interceptors]
+(c/defn add-interceptors [plan & interceptors]
   (update plan ::interceptors (fnil into []) interceptors))
 
 (defmacro get-or [map key else]
@@ -172,7 +172,7 @@
      value#
      ~else))
 
-(defn dependency-val [strategy ctx step-name]
+(c/defn dependency-val [strategy ctx step-name]
   (get-or (::inputs ctx)
           step-name
           (::value (step-result strategy (get-in ctx [::results step-name])))))
@@ -225,7 +225,7 @@
            :fn identity)
     step))
 
-(defn apply-injections [step injections]
+(c/defn apply-injections [step injections]
   (let [injected-step (get injections (:name step))]
     (cond-> step
       injected-step
@@ -271,7 +271,7 @@
                      (conj inputs dep)
                      (rest deps)))))))))
 
-(defn expand-overrides [overrides]
+(c/defn expand-overrides [overrides]
   (reduce (fn [result [step-name override]]
             (let [[inject-kind inject] (:inject override)
                   injected-step-name (some-> inject-kind
