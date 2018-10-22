@@ -14,7 +14,7 @@ Here's the `stats` example from the Graph README expressed in `plan`:
 (p/defn n [xs] (count xs))
 (p/defn m [xs n] (/ (reduce + xs) n))
 (p/defn m2 [xs n] (/ (reduce + (map #(* % %) xs)) n))
-(p/defn v [m m2] (- m2 (* m m)) )
+(p/defn v [m m2] (- m2 (* m m)))
 
 (def stats-plan
   (p/devise `v))
