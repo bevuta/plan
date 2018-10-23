@@ -362,7 +362,7 @@
         ns-plan (devise ns-steps)
         ns-step-specs (->> (::inputs ns-plan)
                            (map (fn [input]
-                                  (assoc (get input all-steps) :name input)))
+                                  (assoc (get all-steps input) :name input)))
                            (concat (::steps ns-plan))
                            (map (juxt :name get-step-spec))
                            (into {}))]
