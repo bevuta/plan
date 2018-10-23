@@ -365,13 +365,13 @@
                                   (assoc (get all-steps input) :name input)))
                            (concat (::steps ns-plan))
                            (map (juxt :name get-step-spec))
-                           (into {}))]
-    (when-let [missing (->> ns-step-specs (remove val) (map first) seq)]
+                           (into {}))
+        ns-dep-steps (filter :deps (::steps ns-plan))]
+    (when-let [missing (->> ns-step-specs (remove val) (map key) seq)]
       (throw (ex-info "Missing specs for some steps"
                       {:steps missing})))
     `(do
-       ~@(->> (::steps ns-plan)
-              (filter :deps)
+       ~@(->> ns-dep-steps
               (map (fn [step]
                      (let [step-name (:name step)]
                        `(s/fdef ~step-name
@@ -381,4 +381,5 @@
                                                  (:deps step)))
                           ~@(when-let [fn-spec (:fn (s/get-spec step-name))]
                               [:fn fn-spec])
-                          :ret ~(get ns-step-specs step-name)))))))))
+                          :ret ~(get ns-step-specs step-name))))))
+       '~(mapv :name ns-dep-steps))))
