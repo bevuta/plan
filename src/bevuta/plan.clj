@@ -242,34 +242,44 @@
 
 (c/defn devise-1 [all-steps overrides visited inputs goal]
   (loop [steps ()
-         visited visited
+         visited' visited
          inputs inputs
          deps [goal]]
     (if (empty? deps)
-      [steps visited inputs]
+      [steps visited' inputs]
       (let [dep (first deps)]
-        (if (contains? visited dep)
-          ;; TODO: Make removal more efficient or unnecessary to begin with
-          (recur (remove #(= dep (:name %)) steps)
-                 (disj visited dep)
-                 inputs
-                 deps)
-          (let [original-step (get all-steps dep)
-                override-step (get-in overrides [:steps dep])]
-            (if-let [dep-step (some-> (or override-step
-                                          original-step)
-                                      (assoc :name dep)
-                                      (resolve-step-alias all-steps)
-                                      (apply-injections (:injections overrides)))]
-              (recur (conj steps dep-step)
-                     (conj visited dep)
-                     inputs
-                     (concat (rest deps)
-                             (:deps dep-step)))
+        (cond (contains? visited dep)
               (recur steps
-                     (conj visited dep)
-                     (conj inputs dep)
-                     (rest deps)))))))))
+                     visited'
+                     inputs
+                     (rest deps))
+
+              (contains? visited' dep)
+              ;; TODO: Make removal more efficient or unnecessary to begin with
+              (recur (remove #(= dep (:name %)) steps)
+                     (disj visited' dep)
+                     inputs
+                     deps)
+
+              :else
+              (let [original-step (get all-steps dep)
+                    override-step (get-in overrides [:steps dep])]
+                (if-let [dep-step (some-> (or override-step
+                                              original-step)
+                                          (assoc :name dep)
+                                          (resolve-step-alias all-steps)
+                                          (apply-injections (:injections overrides))
+                                          ;; (devise-subplan)
+                                          )]
+                  (recur (conj steps dep-step)
+                         (conj visited' dep)
+                         inputs
+                         (concat (rest deps)
+                                 (:deps dep-step)))
+                  (recur steps
+                         (conj visited' dep)
+                         (conj inputs dep)
+                         (rest deps)))))))))
 
 (c/defn expand-overrides [overrides]
   (reduce (fn [result [step-name override]]

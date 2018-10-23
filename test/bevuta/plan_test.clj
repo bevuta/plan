@@ -134,12 +134,17 @@
 (p/defn sharing-step2 [shared-step sharing-step1]
   (+ shared-step sharing-step1))
 
-(deftest dependency-shared-by-dependency
+(deftest dependency-shared-by-dependency-test
   (is (= (p/realize p/in-sequence (p/devise `sharing-step2) `{beta 3})
          `#::{beta 3
               shared-step 6
               sharing-step1 7
               sharing-step2 13})))
+
+(deftest step-which-is-both-a-goal-and-another-goals-dependency-is-calculated-once-test
+  (let [steps (::p/steps (p/devise `[sharing-step1 shared-step]))]
+    (is (= (distinct (map :name steps))
+           (map :name steps)))))
 
 (p/defn boom [beta]
   (throw (ex-info "boom" {::boom ::boom})))
