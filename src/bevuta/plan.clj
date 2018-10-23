@@ -311,11 +311,11 @@
   ([goals]
    (devise {} goals))
   ([overrides goals]
-   (let [overrides'   (->> overrides
-                           (asserting-conform ::overrides)
-                           (expand-overrides))
-         all-goals   (asserting-conform ::goals goals)
-         all-steps   @step-registry]
+   (let [overrides' (->> overrides
+                         (asserting-conform ::overrides)
+                         (expand-overrides))
+         all-goals  (asserting-conform ::goals goals)
+         all-steps  @step-registry]
      (loop [steps   ()
             inputs  #{}
             visited #{}
