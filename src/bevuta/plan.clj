@@ -117,7 +117,7 @@
   (if-let [var (resolve var-name)]
     @var
     (throw (ex-info (str "Unable to resolve var " var-name)
-                    {:name var-name}))))
+                    {::var-name var-name}))))
 
 (c/defn resolve-step-fn [step]
   (or (:fn step)
@@ -182,14 +182,15 @@
 ;; sequence. This allows it to defer potentially blocking derefs to
 ;; another thread, for example.
 (c/defn realize-steps [strategy inputs plan]
-  (let [interceptors (conj (::interceptors plan) step-fn-interceptor)]
-    (loop [{::keys [steps inputs results] :as ctx}
-           {::steps (::steps plan)
-            ::inputs inputs
+  (let [interceptors (conj (::interceptors plan) step-fn-interceptor)
+        steps (::steps plan)]
+    (loop [{::keys [order inputs results] :as ctx}
+           {::inputs inputs
+            ::order (::order plan)
             ::results {}}]
-      (if (seq steps)
-        (let [step (first steps)
-              step-name (:name step)]
+      (if (seq order)
+        (let [step-name (first order)
+              step      (get steps step-name)]
           (if-let [step-deps (:deps step)]
             (let [step-fn   (resolve-step-fn step)
                   step-args (map (partial dependency-val strategy ctx) step-deps)
@@ -201,8 +202,8 @@
                   result    (realize-step strategy step-ctx)]
               (recur (-> ctx
                          (assoc-in [::results step-name] result)
-                         (update ::steps rest))))
-            (recur (cond-> (update ctx ::steps rest)
+                         (update ::order rest))))
+            (recur (cond-> (update ctx ::order rest)
                      (not (contains? inputs step-name))
                      (assoc-in [::inputs step-name]
                                (get-or step
@@ -240,47 +241,6 @@
                                   dep))
                             deps))))))
 
-(c/defn devise-1 [all-steps overrides visited inputs goal]
-  (loop [steps ()
-         visited' visited
-         inputs inputs
-         deps [goal]]
-    (if (empty? deps)
-      [steps visited' inputs]
-      (let [dep (first deps)]
-        (cond (contains? visited dep)
-              (recur steps
-                     visited'
-                     inputs
-                     (rest deps))
-
-              (contains? visited' dep)
-              ;; TODO: Make removal more efficient or unnecessary to begin with
-              (recur (remove #(= dep (:name %)) steps)
-                     (disj visited' dep)
-                     inputs
-                     deps)
-
-              :else
-              (let [original-step (get all-steps dep)
-                    override-step (get-in overrides [:steps dep])]
-                (if-let [dep-step (some-> (or override-step
-                                              original-step)
-                                          (assoc :name dep)
-                                          (resolve-step-alias all-steps)
-                                          (apply-injections (:injections overrides))
-                                          ;; (devise-subplan)
-                                          )]
-                  (recur (conj steps dep-step)
-                         (conj visited' dep)
-                         inputs
-                         (concat (rest deps)
-                                 (:deps dep-step)))
-                  (recur steps
-                         (conj visited' dep)
-                         (conj inputs dep)
-                         (rest deps)))))))))
-
 (c/defn expand-overrides [overrides]
   (reduce (fn [result [step-name override]]
             (let [[inject-kind inject] (:inject override)
@@ -305,7 +265,76 @@
            :injections {}}
           overrides))
 
-;; TODO: Detect cycles
+(c/defn resolve-step [all-steps overrides step-name]
+  (let [original-step (get all-steps step-name)
+        override-step (get-in overrides [:steps step-name])]
+    (some-> (or override-step
+                original-step)
+            (assoc :name step-name)
+            (resolve-step-alias all-steps)
+            (apply-injections (:injections overrides))
+            ;; (devise-subplan)
+            )))
+
+(c/defn resolve-goals [all-steps overrides goals]
+  (loop [deps goals
+         steps {}
+         inputs #{}]
+    (if-let [step-name (first deps)]
+      (if (some-> steps (get step-name) (contains? :name))
+        (recur (rest deps)
+               steps
+               inputs)
+        (let [dep-step (resolve-step all-steps overrides step-name)
+              steps (update steps step-name (fn [dep-step']
+                                              (-> dep-step
+                                                  (assoc :name step-name)
+                                                  (merge dep-step'))))
+              steps (reduce (fn [steps dep-name]
+                              (update-in steps
+                                         [dep-name :rev-deps]
+                                         (fnil conj #{})
+                                         step-name))
+                            steps
+                            (:deps dep-step))
+              inputs (cond-> inputs
+                       (nil? dep-step)
+                       (conj step-name))]
+          (recur (into (rest deps) (:deps dep-step))
+                 steps
+                 inputs)))
+      [steps inputs])))
+
+;; Using Kahn's algorithm
+(c/defn topo-sort [steps]
+  (loop [order []
+         roots (into #{}
+                     (comp (remove (comp seq :deps))
+                           (map :name))
+                     (vals steps))
+         edges (into {}
+                     (map (juxt key (comp set :deps val)))
+                     steps)]
+    (if-let [step-name (first roots)]
+      (let [step (get steps step-name)
+            rd-edges (into {}
+                           (map (fn [rev-dep]
+                                  [rev-dep (-> edges (get rev-dep) (disj step-name))]))
+                           (:rev-deps step))
+            roots (into roots
+                        (comp (remove (comp seq val))
+                              (map key))
+                        rd-edges)]
+        (recur (conj order step-name)
+               (disj roots step-name)
+               (-> edges
+                   (merge rd-edges)
+                   (dissoc step-name))))
+      (if (seq edges)
+        (throw (ex-info "Cycle detected" {::cyclic-steps edges}))
+        order))))
+
+
 ;; TODO: Fail when goals contain (only?) inputs?
 (c/defn devise
   ([goals]
@@ -314,31 +343,20 @@
    (let [overrides' (->> overrides
                          (asserting-conform ::overrides)
                          (expand-overrides))
-         all-goals  (asserting-conform ::goals goals)
-         all-steps  @step-registry]
-     (loop [steps   ()
-            inputs  #{}
-            visited #{}
-            goals all-goals]
-       (if (empty? goals)
-         #::{:inputs inputs
-             :goals all-goals
-             :overrides overrides
-             :steps steps}
-         (let [[steps' visited inputs] (devise-1 all-steps
-                                                 overrides'
-                                                 visited
-                                                 inputs
-                                                 (first goals))]
-           (recur (concat steps steps')
-                  inputs
-                  visited
-                  (rest goals))))))))
+         goals      (asserting-conform ::goals goals)
+         all-steps  @step-registry
+         [steps inputs] (resolve-goals all-steps overrides' goals)
+         order      (topo-sort steps)]
+     #::{:goals     goals
+         :overrides overrides
+         :inputs    inputs
+         :steps     steps
+         :order     order})))
 
 (c/defn validated-inputs [expected-inputs inputs]
   (let [inputs (asserting-conform ::inputs inputs)]
     (when-let [missing (seq (remove (set (keys inputs)) expected-inputs))]
-      (throw (ex-info "Missing plan inputs" {:missing missing})))
+      (throw (ex-info "Missing plan inputs" {::missing-inputs missing})))
     inputs))
 
 (c/defn realize
@@ -363,13 +381,13 @@
         ns-step-specs (->> (::inputs ns-plan)
                            (map (fn [input]
                                   (assoc (get all-steps input) :name input)))
-                           (concat (::steps ns-plan))
+                           (concat (vals (::steps ns-plan)))
                            (map (juxt :name get-step-spec))
                            (into {}))
-        ns-dep-steps (filter :deps (::steps ns-plan))]
+        ns-dep-steps (filter :deps (vals (::steps ns-plan)))]
     (when-let [missing (->> ns-step-specs (remove val) (map key) seq)]
       (throw (ex-info "Missing specs for some steps"
-                      {:steps missing})))
+                      {::missing-specs missing})))
     `(do
        ~@(->> ns-dep-steps
               (map (fn [step]

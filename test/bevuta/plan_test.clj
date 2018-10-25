@@ -52,7 +52,22 @@
   (let [e (try (p/realize p/in-sequence alpha-plan)
                (catch Exception e [::thrown e]))]
     (is (= (first e) ::thrown))
-    (is (= (ex-data (second e)) {:missing [`beta]}))))
+    (is (= (ex-data (second e)) {::p/missing-inputs [`beta]}))))
+
+(p/defn cycle-a [cycle-b] :a)
+(p/defn cycle-b [cycle-c] :b)
+(p/defn cycle-c [cycle-a] :c)
+(p/defn cycle-d [cycle-a] :d)
+
+(deftest devise-plan-with-cycles
+  (try (p/devise `[cycle-a cycle-d])
+       (is false "Devise shouldn't have succeeded")
+       (catch Exception e
+         (is (= `{cycle-a #{cycle-b},
+                  cycle-b #{cycle-c},
+                  cycle-c #{cycle-a},
+                  cycle-d #{cycle-a}}
+                (::p/cyclic-steps (ex-data e)))))))
 
 (deftest devise-plan-with-overrides-test
   (is (= (p/realize p/in-sequence (p/devise `{delta {:value 3}
@@ -99,7 +114,7 @@
 (deftest inject-anonymous-step-override-test
   (let [plan (p/devise `{gamma {:inject {:fn ~inc}}}
                        `alpha)
-        injected-step (some :injected-step (::p/steps plan))]
+        injected-step (some :injected-step (vals (::p/steps plan)))]
     (is (= (p/realize p/in-sequence
                       plan
                       `{beta 2})
@@ -142,9 +157,8 @@
               sharing-step2 13})))
 
 (deftest step-which-is-both-a-goal-and-another-goals-dependency-is-calculated-once-test
-  (let [steps (::p/steps (p/devise `[sharing-step1 shared-step]))]
-    (is (= (distinct (map :name steps))
-           (map :name steps)))))
+  (let [order (::p/order (p/devise `[sharing-step1 shared-step]))]
+    (is (= (distinct order) order))))
 
 (p/defn boom [beta]
   (throw (ex-info "boom" {::boom ::boom})))
