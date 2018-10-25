@@ -34,15 +34,13 @@
 
 (s/def ::value any?)
 
-(s/def ::alias ::step-name)
-
 (s/def ::inject
   (s/or :anonymous (s/keys :req-un [::fn]
                            :opt-un [::deps])
         :named ::step-name))
 
 (s/def ::step
-  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps) ::alias ::inject)]))
+  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps))]))
 
 (s/def ::step*
   (s/keys* :opt-un [::deps]))
@@ -56,9 +54,25 @@
                :single (s/and ::step-name (s/conformer vector) ::goals))
          (s/conformer val)))
 
-(s/def ::overrides
+(create-ns 'bevuta.plan.override)
+(alias 'override 'bevuta.plan.override)
+
+(s/def ::override/replace
   (s/map-of ::step-name ::step
             :conform-keys true))
+
+(s/def ::override/alias
+  (s/map-of ::step-name ::step-name
+            :conform-keys true))
+
+(s/def ::override/inject
+  (s/map-of ::step-name ::inject
+            :conform-keys true))
+
+(s/def ::overrides
+  (s/keys :opt-un [::override/replace
+                   ::override/alias
+                   ::override/inject]))
 
 (def step-registry
   (atom {}))
@@ -241,38 +255,36 @@
                                   dep))
                             deps))))))
 
-(c/defn expand-overrides [overrides]
-  (reduce (fn [result [step-name override]]
-            (let [[inject-kind inject] (:inject override)
-                  injected-step-name (some-> inject-kind
-                                             (case :named inject
-                                                   :anonymous (gensym (str step-name "-inject"))))
-                  inject (some-> inject-kind
-                                 (case :named inject
-                                       :anonymous (cond-> inject
-                                                    (not (contains? inject :deps))
-                                                    (assoc :deps [step-name]))))]
-              (cond-> result
-                (nil? inject)
-                (update :steps assoc step-name (assoc override :override? true))
-
-                (some? inject)
-                (update :injections assoc step-name injected-step-name)
+(c/defn process-overrides [overrides]
+  (reduce (fn [overrides [step-name [inject-kind inject]]]
+            (let [injected-step-name (case inject-kind
+                                       :named inject
+                                       :anonymous (gensym (str step-name "-inject")))
+                  inject (case inject-kind
+                           :named inject
+                           :anonymous (cond-> inject
+                                        (not (contains? inject :deps))
+                                        (assoc :deps [step-name])))]
+              (cond-> overrides
+                true
+                (assoc-in [:inject step-name] injected-step-name)
 
                 (= :anonymous inject-kind)
-                (update :steps assoc injected-step-name inject))))
-          {:steps {}
-           :injections {}}
-          overrides))
+                (assoc-in [:replace injected-step-name] inject))))
+          overrides
+          (:inject overrides)))
 
 (c/defn resolve-step [all-steps overrides step-name]
   (let [original-step (get all-steps step-name)
-        override-step (get-in overrides [:steps step-name])]
-    (some-> (or override-step
+        replacement-step (get-in overrides [:replace step-name])
+        alias-step    (when-let [alias (get-in overrides [:alias step-name])]
+                        {:alias alias})]
+    (some-> (or replacement-step
+                alias-step
                 original-step)
             (assoc :name step-name)
             (resolve-step-alias all-steps)
-            (apply-injections (:injections overrides))
+            (apply-injections (:inject overrides))
             ;; (devise-subplan)
             )))
 
@@ -342,7 +354,7 @@
   ([overrides goals]
    (let [overrides' (->> overrides
                          (asserting-conform ::overrides)
-                         (expand-overrides))
+                         (process-overrides))
          goals      (asserting-conform ::goals goals)
          all-steps  @step-registry
          [steps inputs] (resolve-goals all-steps overrides' goals)
