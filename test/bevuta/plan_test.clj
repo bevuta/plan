@@ -55,12 +55,19 @@
     (is (= (first e) ::thrown))
     (is (= (ex-data (second e)) {::p/missing-inputs [`beta]}))))
 
+(deftest devise-goals-which-are-inputs
+  (try (p/devise `[alpha an-undefined-step-as-goal another-undefined-step-as-goal])
+       (is false "Devise shouldn't have succeeded")
+       (catch Exception e
+         (is (= `#{an-undefined-step-as-goal another-undefined-step-as-goal}
+                (::p/undefined-goals (ex-data e)))))))
+
 (p/defn cycle-a [cycle-b] :a)
 (p/defn cycle-b [cycle-c] :b)
 (p/defn cycle-c [cycle-a] :c)
 (p/defn cycle-d [cycle-a] :d)
 
-(deftest devise-plan-with-cycles
+(deftest devise-with-cycles
   (try (p/devise `[cycle-a cycle-d])
        (is false "Devise shouldn't have succeeded")
        (catch Exception e
@@ -70,7 +77,7 @@
                   cycle-d #{cycle-a}}
                 (::p/cyclic-steps (ex-data e)))))))
 
-(deftest devise-plan-with-overrides-test
+(deftest devise-with-overrides-test
   (is (= (p/realize p/in-sequence (p/devise `{:replace {delta {:value 3}
                                                         gamma {:deps [delta] :fn ~inc}}}
                                             `alpha))
@@ -85,7 +92,7 @@
   (swap! invocation-count inc)
   10)
 
-(deftest devise-plan-with-alias-override-test
+(deftest devise-with-alias-override-test
   (binding [invocation-count (atom 0)]
     (is (= (p/realize p/in-sequence (p/devise `{:replace {delta invocation-counting-step
                                                           gamma invocation-counting-step}}
@@ -99,7 +106,7 @@
 (p/defn double-zeta-gamma [zeta gamma]
   (* 2 gamma zeta))
 
-(deftest devise-plan-with-named-inject-override-test
+(deftest devise-with-named-inject-override-test
   (is (= (p/realize p/in-sequence
                     (p/devise `{:inject {gamma double-zeta-gamma}}
                               `alpha)
@@ -112,7 +119,7 @@
               double-zeta-gamma 54
               alpha 116})))
 
-(deftest devise-plan-with-anonymous-inject-override-test
+(deftest devise-with-anonymous-inject-override-test
   (let [plan (p/devise `{:inject {gamma {:fn ~inc}}}
                        `alpha)
         injected-step (some :injected-step (vals (::p/steps plan)))]
@@ -125,7 +132,7 @@
                 ~injected-step 4
                 alpha 16}))))
 
-(deftest devise-plan-inject-and-alias-override-for-the-same-step-test
+(deftest devise-inject-and-alias-override-for-the-same-step-test
   (let [plan (p/devise `{:replace {gamma delta}
                          :inject {gamma {:fn ~inc}}}
                        `alpha)

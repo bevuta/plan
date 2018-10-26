@@ -321,8 +321,6 @@
         (throw (ex-info "Cycle detected" {::cyclic-steps edges}))
         order))))
 
-
-;; TODO: Fail when goals contain (only?) inputs?
 (c/defn devise
   ([goals]
    (devise {} goals))
@@ -332,13 +330,15 @@
                          (process-overrides))
          goals      (asserting-conform ::goals goals)
          all-steps  @step-registry
-         [steps inputs] (resolve-goals all-steps overrides' goals)
-         order      (topo-sort steps)]
-     #::{:goals     goals
-         :overrides overrides
-         :inputs    inputs
-         :steps     steps
-         :order     order})))
+         [steps inputs] (resolve-goals all-steps overrides' goals)]
+     (if-let [undefined-goals (seq (filter inputs goals))]
+       (throw (ex-info "Some goals are undefined"
+                       {::undefined-goals (set undefined-goals)}))
+       #::{:goals     goals
+           :overrides overrides
+           :inputs    inputs
+           :steps     steps
+           :order     (topo-sort steps)}))))
 
 (c/defn validated-inputs [expected-inputs inputs]
   (let [inputs (asserting-conform ::inputs inputs)]
