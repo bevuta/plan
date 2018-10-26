@@ -3,6 +3,7 @@
             [clojure.spec.alpha :as s]
             [bevuta.interceptors :as interceptors]
             [bevuta.plan :as p]
+            [bevuta.plan.step :as step]
             [bevuta.plan.interceptors :as pi]
             [bevuta.other-test-ns :as other]))
 
@@ -86,8 +87,8 @@
 
 (deftest devise-plan-with-alias-override-test
   (binding [invocation-count (atom 0)]
-    (is (= (p/realize p/in-sequence (p/devise `{:alias {delta invocation-counting-step
-                                                        gamma invocation-counting-step}}
+    (is (= (p/realize p/in-sequence (p/devise `{:replace {delta invocation-counting-step
+                                                          gamma invocation-counting-step}}
                                               `alpha))
            `#::{invocation-counting-step 10
                 delta 10
@@ -125,7 +126,7 @@
                 alpha 16}))))
 
 (deftest devise-plan-inject-and-alias-override-for-the-same-step-test
-  (let [plan (p/devise `{:alias {gamma delta}
+  (let [plan (p/devise `{:replace {gamma delta}
                          :inject {gamma {:fn ~inc}}}
                        `alpha)
         injected-step (some :injected-step (vals (::p/steps plan)))]
@@ -188,7 +189,7 @@
   (let [log (atom [])
         plan (-> (p/devise `delta-sum)
                  (p/add-interceptors {:enter (fn [ctx]
-                                               (swap! log conj (::p/step-name ctx))
+                                               (swap! log conj (::step/name ctx))
                                                (assoc ctx ::test :foo))}
                                      {:enter (fn [ctx]
                                                (swap! log conj (::test ctx))
@@ -225,7 +226,7 @@
                {`beta 10})
     (is false "Didn't throw exception")
     (catch Exception e
-      (is (= (::p/step-name (ex-data e)) `boom))
+      (is (= (::step/name (ex-data e)) `boom))
       (is (= (ex-data (.getCause e)) {::boom ::boom})))))
 
 (deftest handle-error-interceptor-test
@@ -234,7 +235,7 @@
                               (p/add-interceptors (pi/handle-error
                                                    RuntimeException
                                                    (fn [ctx error]
-                                                     (assoc ctx ::p/value ::no-problem)))))
+                                                     (assoc ctx ::step/value ::no-problem)))))
                           {`beta 10})]
     (is (= (get result `boom) ::no-problem))))
 
@@ -244,14 +245,14 @@
         log2 (atom #{})
         collect (fn [log]
                   {:enter (fn [ctx]
-                            (swap! log conj (::p/step-name ctx))
+                            (swap! log conj (::step/name ctx))
                             ctx)})
         result (p/realize p/in-parallel
                           (p/add-interceptors alpha-plan
                                               pi/trace
                                               pi/time
                                               (collect log1)
-                                              (pi/when (comp `#{delta gamma} ::p/step-name)
+                                              (pi/when (comp `#{delta gamma} ::step/name)
                                                 (collect log2)))
                           `{beta 2})]
     (is (= `#{alpha delta gamma} @log1))

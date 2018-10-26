@@ -3,75 +3,41 @@
   (:require [clojure.core :as c]
             [clojure.spec.alpha :as s]
             [clojure.set :as set]
-            [bevuta.interceptors :as i]))
+            [bevuta.interceptors :as i]
+            [bevuta.plan.step :as step]))
 
-
-;; Snatched from `clojure.spec` and slightly refactored
-(c/defn qualify-symbol
-  "Qualify symbol s by resolving it or using the current *ns*."
-  [sym]
-  (if-let [ns-sym (some-> sym namespace symbol)]
-    (or (some-> (get (ns-aliases *ns*) ns-sym)
-                ns-name
-                name
-                (symbol (name sym)))
-        sym)
-    (symbol (name (ns-name *ns*)) (name sym))))
 
 (c/defn unqualify-symbol [s]
   (symbol (name s)))
 
-;; TODO: Introduce bevuta.plan.step ns
-(s/def ::step-name
-  (s/and symbol? (s/conformer qualify-symbol)))
-
-(s/def ::dep ::step-name)
-
-(s/def ::deps
-  (s/coll-of ::dep))
-
-(s/def ::fn ifn?)
-
-(s/def ::value any?)
-
-(s/def ::inject
-  (s/or :anonymous (s/keys :req-un [::fn]
-                           :opt-un [::deps])
-        :named ::step-name))
-
-(s/def ::step
-  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps))]))
+(s/def ::step ::step/step)
 
 (s/def ::step*
-  (s/keys* :opt-un [::deps]))
+  (s/keys* :opt-un [::step/deps]))
 
 (s/def ::inputs
-  (s/map-of ::step-name ::value
+  (s/map-of ::step/name ::step/value
             :conform-keys true))
 
 (s/def ::goals
-  (s/and (s/or :multi  (s/coll-of ::step-name :into #{})
-               :single (s/and ::step-name (s/conformer vector) ::goals))
+  (s/and (s/or :multi  (s/coll-of ::step/name :into #{})
+               :single (s/and ::step/name (s/conformer vector) ::goals))
          (s/conformer val)))
 
 (create-ns 'bevuta.plan.override)
 (alias 'override 'bevuta.plan.override)
 
 (s/def ::override/replace
-  (s/map-of ::step-name ::step
-            :conform-keys true))
-
-(s/def ::override/alias
-  (s/map-of ::step-name ::step-name
+  (s/map-of ::step/name (s/or :step ::step
+                              :alias ::step/alias)
             :conform-keys true))
 
 (s/def ::override/inject
-  (s/map-of ::step-name ::inject
+  (s/map-of ::step/name ::step/inject
             :conform-keys true))
 
 (s/def ::overrides
   (s/keys :opt-un [::override/replace
-                   ::override/alias
                    ::override/inject]))
 
 (def step-registry
@@ -91,27 +57,30 @@
     step))
 
 (s/fdef def
-        :args (s/cat :name ::step-name
-                     :step ::step*))
+  :args (s/cat :name ::step/name
+               :step ::step*))
 
 (defmacro def
   [step-name & definition]
-  (let [step-name (s/conform ::step-name step-name)
+  (let [step-name (s/conform ::step/name step-name)
         step (or (s/conform ::step* definition) {})]
-    `(swap! step-registry
-            assoc
-            '~step-name
-            ~(quote-step step))))
+    `(do (swap! step-registry
+                assoc
+                '~step-name
+                ~(quote-step step))
+         '~step-name)))
+
+(s/def ::dep ::step/dep)
 
 (s/def ::dep-destructuring
   (s/keys :req [::dep]))
 
 (s/fdef defn
-        :args (s/cat :name ::step-name
-                     :args (s/coll-of (s/or :symbol ::step-name
-                                            :destructuring-map ::dep-destructuring)
-                                      :kind vector?)
-                     :body (s/+ any?)))
+  :args (s/cat :name ::step/name
+               :args (s/coll-of (s/or :symbol ::step/name
+                                      :destructuring-map ::dep-destructuring)
+                                :kind vector?)
+               :body (s/+ any?)))
 
 (defmacro defn [step-name args & body]
   (let [deps (map (fn [arg]
@@ -139,8 +108,8 @@
 
 (def step-fn-interceptor
   {:enter (fn [ctx]
-            (let [{::keys [step-fn step-args]} ctx]
-              (assoc ctx ::value (apply step-fn step-args))))})
+            (let [{::step/keys [fn args]} ctx]
+              (assoc ctx ::step/value (apply fn args))))})
 
 (defprotocol Strategy
   (realize-step [_ ctx])
@@ -189,7 +158,7 @@
 (c/defn dependency-val [strategy ctx step-name]
   (get-or (::inputs ctx)
           step-name
-          (::value (step-result strategy (get-in ctx [::results step-name])))))
+          (::step/value (step-result strategy (get-in ctx [::results step-name])))))
 
 ;; NOTE: We rely on `map`s laziness here so that steps are actually
 ;; only dereferenced when `realize-step` realizes the `step-args`
@@ -208,10 +177,10 @@
           (if-let [step-deps (:deps step)]
             (let [step-fn   (resolve-step-fn step)
                   step-args (map (partial dependency-val strategy ctx) step-deps)
-                  step-ctx  {::step-name    step-name
-                             ::step-deps    step-deps
-                             ::step-fn      step-fn
-                             ::step-args    step-args
+                  step-ctx  {::step/name    step-name
+                             ::step/deps    step-deps
+                             ::step/fn      step-fn
+                             ::step/args    step-args
                              ::i/queue      interceptors}
                   result    (realize-step strategy step-ctx)]
               (recur (-> ctx
@@ -229,7 +198,7 @@
                             results)
               values (into inputs
                            (map (fn [[step-name result]]
-                                  [step-name (::value result)]))
+                                  [step-name (::step/value result)]))
                            results)]
           (with-meta values {::results results}))))))
 
@@ -255,6 +224,9 @@
                                   dep))
                             deps))))))
 
+(c/defn map-entry [k v]
+  (clojure.lang.MapEntry. k v))
+
 (c/defn process-overrides [overrides]
   (reduce (fn [overrides [step-name [inject-kind inject]]]
             (let [injected-step-name (case inject-kind
@@ -270,17 +242,20 @@
                 (assoc-in [:inject step-name] injected-step-name)
 
                 (= :anonymous inject-kind)
-                (assoc-in [:replace injected-step-name] inject))))
+                (assoc-in [:replace injected-step-name] (map-entry :step inject)))))
           overrides
           (:inject overrides)))
 
+(c/defn resolve-override-replace-step [overrides step-name]
+  (when-let [r (get-in overrides [:replace step-name])]
+    (case (key r)
+      :step (val r)
+      :alias {:alias (val r)})))
+
 (c/defn resolve-step [all-steps overrides step-name]
   (let [original-step (get all-steps step-name)
-        replacement-step (get-in overrides [:replace step-name])
-        alias-step    (when-let [alias (get-in overrides [:alias step-name])]
-                        {:alias alias})]
-    (some-> (or replacement-step
-                alias-step
+        replace-step (resolve-override-replace-step overrides step-name)]
+    (some-> (or replace-step
                 original-step)
             (assoc :name step-name)
             (resolve-step-alias all-steps)
