@@ -272,3 +272,53 @@
         timings (->> result meta ::p/results vals (map ::pi/time-ns))]
     (is (seq timings))
     (is (every? nat-int? timings))))
+
+;; TODO: Notice that delta is the same step as in the parent plan, so
+;; it could be re-used instead of re-calclated for the subplan. This
+;; would only work if the step really is the same, though, e.g. the
+;; same overrides have to be applied. Right now we take the easy route
+;; of re-calculating it.
+(p/defn omega [beta tau delta]
+  (+ beta tau delta))
+
+(p/def subomega
+  :goal omega)
+
+(p/defn alpha-omega [alpha subomega]
+  (+ alpha subomega))
+
+(deftest subplan-test
+  (is (= `#::{beta 3
+              delta 9
+              tau 5
+              gamma 3
+              alpha 24
+              alpha-omega 41
+              subomega 17}
+         (p/realize p/in-parallel
+                    (p/devise `alpha-omega)
+                    `{beta 3
+                      tau 5}))))
+
+(p/def subdelta
+  :goal delta
+  :plan (p/devise {:replace {`beta {:value 2}}} `[delta gamma]))
+
+(deftest subplan-with-explicit-plan-test
+  (let [result (is (p/realize p/in-sequence (p/devise `subdelta)))]
+    (is (= `#::{subdelta 4} result))))
+
+
+(p/def broken-subdelta
+  :goal delta
+  :plan (p/devise {:replace {`beta {:value 2}}} `gamma))
+
+(deftest subplan-with-explicit-plan-for-different-goal
+  (try (p/devise `broken-subdelta)
+       (is false "Devise shouldn't have succeeded")
+       (catch Exception e
+         (is (= `broken-subdelta (::step/name (ex-data e))))
+         (is (= `delta (::step/goal (ex-data e))))
+         (is (= `#{gamma} (::p/subplan-goals (ex-data e)))))))
+
+;; TODO: Test metadata of results

@@ -1,9 +1,6 @@
 (ns bevuta.plan.step
   (:require [clojure.spec.alpha :as s]))
 
-(s/def ::step
-  (s/keys :req-un [(or ::deps ::value (and ::fn ::deps))]))
-
 ;; Snatched from `clojure.spec` and slightly refactored
 (defn qualify-symbol
   "Qualify symbol s by resolving it or using the current *ns*."
@@ -16,9 +13,17 @@
         sym)
     (symbol (name (ns-name *ns*)) (name sym))))
 
+(s/def ::step
+  (s/keys :req-un [(or ::deps
+                       ::value
+                       (and ::fn ::deps)
+                       ::goal
+                       (and ::plan ::goal))]))
 
 (s/def ::name
   (s/and symbol? (s/conformer qualify-symbol)))
+
+(s/def ::goal ::name)
 
 (s/def ::dep ::name)
 

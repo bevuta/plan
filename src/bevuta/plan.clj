@@ -6,14 +6,13 @@
             [bevuta.interceptors :as i]
             [bevuta.plan.step :as step]))
 
-
 (c/defn unqualify-symbol [s]
   (symbol (name s)))
 
 (s/def ::step ::step/step)
 
 (s/def ::step*
-  (s/keys* :opt-un [::step/deps]))
+  (s/keys* :opt-un [::step/deps ::step/goal ::step/plan]))
 
 (s/def ::inputs
   (s/map-of ::step/name ::step/value
@@ -52,9 +51,11 @@
   (list 'quote v))
 
 (c/defn quote-step [step]
-  (if (:deps step)
-    (update step :deps (partial mapv quote-value))
-    step))
+  (cond-> step
+    (:deps step)
+    (update :deps (partial mapv quote-value))
+    (:goal step)
+    (update :goal quote-value)))
 
 (s/fdef def
   :args (s/cat :name ::step/name
@@ -102,15 +103,6 @@
     (throw (ex-info (str "Unable to resolve var " var-name)
                     {::var-name var-name}))))
 
-(c/defn resolve-step-fn [step]
-  (or (:fn step)
-      (resolve-var (:name step))))
-
-(def step-fn-interceptor
-  {:enter (fn [ctx]
-            (let [{::step/keys [fn args]} ctx]
-              (assoc ctx ::step/value (apply fn args))))})
-
 (defprotocol Strategy
   (realize-step [_ ctx])
   (step-result [_ step-ref])
@@ -147,6 +139,30 @@
     (step-done? [_ step-future]
       (future-done? step-future))))
 
+(declare realize-steps)
+
+(c/defn subplan-step-fn [strategy step]
+  (fn [& deps]
+    (let [inputs  (zipmap (:deps step) deps)
+          results (realize-steps strategy inputs (:plan step))
+          goal    (:goal step)]
+      {::step/results results
+       ::step/value (get results goal)})))
+
+(c/defn resolve-step-fn [strategy step]
+  (if (:plan step)
+    (subplan-step-fn strategy step)
+    (or (:fn step)
+        (resolve-var (:name step)))))
+
+(def step-fn-interceptor
+  {:enter (fn [ctx]
+            (let [{::step/keys [fn args plan goal]} ctx]
+              (let [result (apply fn args)]
+                (if plan
+                  (merge ctx result)
+                  (assoc ctx ::step/value result)))))})
+
 (c/defn add-interceptors [plan & interceptors]
   (update plan ::interceptors (fnil into []) interceptors))
 
@@ -159,6 +175,17 @@
   (get-or (::inputs ctx)
           step-name
           (::step/value (step-result strategy (get-in ctx [::results step-name])))))
+
+(c/defn process-results [strategy inputs results]
+  (let [results (into {}
+                      (map (fn [[step-name result]]
+                             [step-name (step-result strategy result)]))
+                      results)
+        values (into inputs
+                     (map (fn [[step-name result]]
+                            [step-name (::step/value result)]))
+                     results)]
+    (with-meta values {::results results})))
 
 ;; NOTE: We rely on `map`s laziness here so that steps are actually
 ;; only dereferenced when `realize-step` realizes the `step-args`
@@ -175,13 +202,18 @@
         (let [step-name (first order)
               step      (get steps step-name)]
           (if-let [step-deps (:deps step)]
-            (let [step-fn   (resolve-step-fn step)
+            (let [step-fn   (resolve-step-fn strategy step)
                   step-args (map (partial dependency-val strategy ctx) step-deps)
                   step-ctx  {::step/name    step-name
                              ::step/deps    step-deps
                              ::step/fn      step-fn
                              ::step/args    step-args
                              ::i/queue      interceptors}
+                  step-ctx  (if-let [step-plan (:plan step)]
+                              (assoc step-ctx
+                                     ::step/plan step-plan
+                                     ::step/goal (:goal step))
+                              step-ctx)
                   result    (realize-step strategy step-ctx)]
               (recur (-> ctx
                          (assoc-in [::results step-name] result)
@@ -192,15 +224,7 @@
                                (get-or step
                                        :value
                                        (resolve-var step-name)))))))
-        (let [results (into {}
-                            (map (fn [[step-name result]]
-                                   [step-name (step-result strategy result)]))
-                            results)
-              values (into inputs
-                           (map (fn [[step-name result]]
-                                  [step-name (::step/value result)]))
-                           results)]
-          (with-meta values {::results results}))))))
+        (process-results strategy inputs results)))))
 
 (c/defn resolve-step-alias [step all-steps]
   (if-let [alias (:alias step)]
@@ -252,6 +276,22 @@
       :step (val r)
       :alias {:alias (val r)})))
 
+(declare devise)
+
+(c/defn devise-subplan [step]
+  (if-let [goal (:goal step)]
+    (let [plan (or (:plan step) (devise goal))
+          deps (vec (::inputs plan))]
+      (when-not (contains? (::goals plan) goal)
+        (throw (ex-info "Subplan doesn't include required goal"
+                        {::step/name (:name step)
+                         ::step/goal goal
+                         ::subplan-goals (::goals plan)})))
+      (assoc step
+             :deps deps
+             :plan plan))
+    step))
+
 (c/defn resolve-step [all-steps overrides step-name]
   (let [original-step (get all-steps step-name)
         replace-step (resolve-override-replace-step overrides step-name)]
@@ -260,8 +300,7 @@
             (assoc :name step-name)
             (resolve-step-alias all-steps)
             (apply-injections (:inject overrides))
-            ;; (devise-subplan)
-            )))
+            (devise-subplan))))
 
 (c/defn resolve-goals [all-steps overrides goals]
   (loop [deps goals
