@@ -34,23 +34,20 @@
 (p/defn delta-sum [delta {::p/dep other/delta :as other-delta}]
   (+ delta other-delta))
 
-(deftest realize-plan-strategies-test
-  (doseq [[desc strategy] {"in sequence" p/in-sequence
-                           "in parallel" p/in-parallel}]
-    (testing desc
-      (is (= (p/realize strategy alpha-plan {`beta 6})
-             `#::{alpha 78
-                  beta 6
-                  delta 36
-                  gamma 3})))))
+(deftest realize-test
+  (is (= (p/realize alpha-plan {`beta 6})
+         `#::{alpha 78
+              beta 6
+              delta 36
+              gamma 3})))
 
 (deftest realize-multiple-goals-test
-  (is (= (p/realize p/in-sequence (p/devise `[gamma other/delta]))
+  (is (= (p/realize (p/devise `[gamma other/delta]))
          `#::{gamma 3
               other/delta 8})))
 
 (deftest realize-with-missing-inputs-test
-  (let [e (try (p/realize p/in-sequence alpha-plan)
+  (let [e (try (p/realize alpha-plan)
                (catch Exception e [::thrown e]))]
     (is (= (first e) ::thrown))
     (is (= (ex-data (second e)) {::p/missing-inputs [`beta]}))))
@@ -78,7 +75,7 @@
                 (::p/cyclic-steps (ex-data e)))))))
 
 (deftest devise-with-overrides-test
-  (is (= (p/realize p/in-sequence (p/devise `{:replace {delta {:value 3}
+  (is (= (p/realize (p/devise `{:replace {delta {:value 3}
                                                         gamma {:deps [delta] :fn ~inc}}}
                                             `alpha))
          `#::{delta 3
@@ -94,7 +91,7 @@
 
 (deftest devise-with-alias-override-test
   (binding [invocation-count (atom 0)]
-    (is (= (p/realize p/in-sequence (p/devise `{:replace {delta invocation-counting-step
+    (is (= (p/realize (p/devise `{:replace {delta invocation-counting-step
                                                           gamma invocation-counting-step}}
                                               `alpha))
            `#::{invocation-counting-step 10
@@ -107,8 +104,7 @@
   (* 2 gamma zeta))
 
 (deftest devise-with-named-inject-override-test
-  (is (= (p/realize p/in-sequence
-                    (p/devise `{:inject {gamma double-zeta-gamma}}
+  (is (= (p/realize (p/devise `{:inject {gamma double-zeta-gamma}}
                               `alpha)
                     `{beta 2})
          `#::{beta 2
@@ -123,9 +119,7 @@
   (let [plan (p/devise `{:inject {gamma {:fn ~inc}}}
                        `alpha)
         injected-step (some :injected-step (vals (::p/steps plan)))]
-    (is (= (p/realize p/in-sequence
-                      plan
-                      `{beta 2})
+    (is (= (p/realize plan `{beta 2})
            `#::{beta 2
                 delta 4
                 gamma 3
@@ -137,9 +131,7 @@
                          :inject {gamma {:fn ~inc}}}
                        `alpha)
         injected-step (some :injected-step (vals (::p/steps plan)))]
-    (is (= (p/realize p/in-sequence
-                      plan
-                      `{beta 2})
+    (is (= (p/realize plan `{beta 2})
            `#::{beta 2
                 delta 4
                 gamma 4
@@ -150,12 +142,12 @@
   (doseq [[desc goal] {"with def" `zeta
                        "with defn" `zeta2}]
     (testing desc
-      (is (= (p/realize p/in-sequence (p/devise goal))
+      (is (= (p/realize (p/devise goal))
              {`other/theta 18
               goal 9})))))
 
 (deftest dependencies-via-destructuring-syntax-test
-  (is (= (p/realize p/in-sequence (p/devise `delta-sum) `{beta 2})
+  (is (= (p/realize (p/devise `delta-sum) `{beta 2})
          `#::{beta 2
               delta 4
               other/delta 8
@@ -172,7 +164,7 @@
   (+ shared-step sharing-step1))
 
 (deftest dependency-shared-by-dependency-test
-  (is (= (p/realize p/in-sequence (p/devise `sharing-step2) `{beta 3})
+  (is (= (p/realize (p/devise `sharing-step2) `{beta 3})
          `#::{beta 3
               shared-step 6
               sharing-step1 7
@@ -187,7 +179,7 @@
 
 (deftest error-handling-test
   (try
-    (p/realize p/in-sequence (p/devise `boom) {`beta 10})
+    (p/realize (p/devise `boom) {`beta 10})
     (is false)
     (catch Exception e
       (is (= (ex-data e) {::boom ::boom})))))
@@ -201,14 +193,13 @@
                                      {:enter (fn [ctx]
                                                (swap! log conj (::test ctx))
                                                ctx)}))
-        result (p/realize p/in-sequence plan `{beta 2})]
+        result (p/realize plan `{beta 2})]
     (is (= `[delta :foo delta-sum :foo] @log))
     (is (= [:foo :foo] (->> result meta ::p/results vals (map ::test))))))
 
 (deftest interceptor-error-propagation-test
   (try
-    (p/realize p/in-parallel
-               (-> (p/devise `boom)
+    (p/realize (-> (p/devise `boom)
                    (p/add-interceptors {:error (fn [ctx error]
                                                  (throw (ex-info "boom" {:no 1 :ctx ctx})))}
                                        {:error (fn [ctx error]
@@ -227,8 +218,7 @@
 
 (deftest error-context-interceptor-test
   (try
-    (p/realize p/in-sequence
-               (-> (p/devise `boom-dependent)
+    (p/realize (-> (p/devise `boom-dependent)
                    (p/add-interceptors pi/error-context))
                {`beta 10})
     (is false "Didn't throw exception")
@@ -237,8 +227,7 @@
       (is (= (ex-data (.getCause e)) {::boom ::boom})))))
 
 (deftest handle-error-interceptor-test
-  (let [result (p/realize p/in-parallel
-                          (-> (p/devise `boom-dependent)
+  (let [result (p/realize (-> (p/devise `boom-dependent)
                               (p/add-interceptors (pi/handle-error
                                                    RuntimeException
                                                    (fn [ctx error]
@@ -254,8 +243,7 @@
                   {:enter (fn [ctx]
                             (swap! log conj (::step/name ctx))
                             ctx)})
-        result (p/realize p/in-parallel
-                          (p/add-interceptors alpha-plan
+        result (p/realize (p/add-interceptors alpha-plan
                                               pi/trace
                                               pi/time
                                               (collect log1)
@@ -266,8 +254,7 @@
     (is (= `#{delta gamma} @log2))))
 
 (deftest time-interceptor-test
-  (let [result (p/realize p/in-sequence
-                          (p/add-interceptors alpha-plan pi/time)
+  (let [result (p/realize (p/add-interceptors alpha-plan pi/time)
                           `{beta 2})
         timings (->> result meta ::p/results vals (map ::pi/time-ns))]
     (is (seq timings))
@@ -295,8 +282,7 @@
               alpha 24
               alpha-omega 41
               subomega 17}
-         (p/realize p/in-parallel
-                    (p/devise `alpha-omega)
+         (p/realize (p/devise `alpha-omega)
                     `{beta 3
                       tau 5}))))
 
@@ -305,7 +291,7 @@
   :plan (p/devise {:replace {`beta {:value 2}}} `[delta gamma]))
 
 (deftest subplan-with-explicit-plan-test
-  (let [result (is (p/realize p/in-sequence (p/devise `subdelta)))]
+  (let [result (is (p/realize (p/devise `subdelta)))]
     (is (= `#::{subdelta 4} result))))
 
 

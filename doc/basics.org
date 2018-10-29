@@ -82,7 +82,7 @@
   strategy is to realize steps in sequence:
 
   #+BEGIN_SRC clojure :ns basics :exports both
-    (p/realize p/in-sequence alpha-plan)
+    (p/realize alpha-plan)
   #+END_SRC
 
   As you can see, the result is a map from step names to their
@@ -110,14 +110,14 @@
   =beta=! Right, we get an error:
 
   #+BEGIN_SRC clojure :ns basics :exports both :results output
-    (p/realize p/in-sequence alpha-plan)
+    (p/realize alpha-plan)
   #+END_SRC
 
   Undefined steps like this are considered /inputs/ to the plan which
   need to be provided upon realization. Try this:
 
   #+BEGIN_SRC clojure :ns basics :exports both
-    (p/realize p/in-sequence alpha-plan {`beta 6})
+    (p/realize alpha-plan {`beta 6})
   #+END_SRC
 
   Steps may also depend on steps from other namespaces. Say we have
@@ -161,7 +161,7 @@
     (p/defn zeta [a/theta]
       (/ theta 5))
 
-    (p/realize p/in-sequence (p/devise `zeta) {})
+    (p/realize (p/devise `zeta) {})
   #+END_SRC
 
   When you need to depend on multiple steps of the same name from
@@ -172,7 +172,7 @@
     (p/defn tau [delta {::p/dep a/delta :as other-delta}]
       (+ delta other-delta))
 
-    (p/realize p/in-sequence (p/devise `tau) {`a/omega 10 `beta 3})
+    (p/realize (p/devise `tau) {`a/omega 10 `beta 3})
   #+END_SRC
 
   You might wonder at this point why you should bother with all of

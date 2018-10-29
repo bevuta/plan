@@ -12,7 +12,7 @@
 (s/def ::step ::step/step)
 
 (s/def ::step*
-  (s/keys* :opt-un [::step/deps ::step/goal ::step/plan]))
+  (s/keys* :opt-un [::step/deps ::step/goal ::step/plan ::step/strategy]))
 
 (s/def ::inputs
   (s/map-of ::step/name ::step/value
@@ -103,55 +103,19 @@
     (throw (ex-info (str "Unable to resolve var " var-name)
                     {::var-name var-name}))))
 
-(defprotocol Strategy
-  (realize-step [_ ctx])
-  (step-result [_ step-ref])
-  (step-done? [_ step-ref]))
-
-(c/defn call-step-fn [ctx]
-  (i/execute ctx))
-
-(def in-sequence
-  (reify
-    Object
-    (toString [_] "in-sequence")
-    Strategy
-    (realize-step [_ ctx]
-      (call-step-fn ctx))
-    (step-result [_ result]
-      result)
-    (step-done? [_ _]
-      true)))
-
-(def in-parallel
-  (reify
-    Object
-    (toString [_] "in-parallel")
-    Strategy
-    (realize-step [_ ctx]
-      (future (call-step-fn ctx)))
-    (step-result [_ step-future]
-      (try
-        @step-future
-        ;; TODO: Is this a good idea? ;-)
-        (catch java.util.concurrent.ExecutionException e
-          (throw (.getCause e)))))
-    (step-done? [_ step-future]
-      (future-done? step-future))))
-
 (declare realize-steps)
 
-(c/defn subplan-step-fn [strategy step]
+(c/defn subplan-step-fn [step]
   (fn [& deps]
     (let [inputs  (zipmap (:deps step) deps)
-          results (realize-steps strategy inputs (:plan step))
+          results (realize-steps inputs (:plan step))
           goal    (:goal step)]
       {::step/results results
        ::step/value (get results goal)})))
 
-(c/defn resolve-step-fn [strategy step]
+(c/defn resolve-step-fn [step]
   (if (:plan step)
-    (subplan-step-fn strategy step)
+    (subplan-step-fn step)
     (or (:fn step)
         (resolve-var (:name step)))))
 
@@ -171,15 +135,16 @@
      value#
      ~else))
 
-(c/defn dependency-val [strategy ctx step-name]
+(c/defn dependency-val [ctx step-name]
   (get-or (::inputs ctx)
           step-name
-          (::step/value (step-result strategy (get-in ctx [::results step-name])))))
+          (when-let [result (get-in ctx [::results step-name])]
+            (::step/value (result)))))
 
-(c/defn process-results [strategy inputs results]
+(c/defn process-results [inputs results]
   (let [results (into {}
                       (map (fn [[step-name result]]
-                             [step-name (step-result strategy result)]))
+                             [step-name (result)]))
                       results)
         values (into inputs
                      (map (fn [[step-name result]]
@@ -188,10 +153,10 @@
     (with-meta values {::results results})))
 
 ;; NOTE: We rely on `map`s laziness here so that steps are actually
-;; only dereferenced when `realize-step` realizes the `step-args`
+;; only dereferenced when `plan/realize` realizes the `step-args`
 ;; sequence. This allows it to defer potentially blocking derefs to
 ;; another thread, for example.
-(c/defn realize-steps [strategy inputs plan]
+(c/defn realize-steps [inputs plan]
   (let [interceptors (conj (::interceptors plan) step-fn-interceptor)
         steps (::steps plan)]
     (loop [{::keys [order inputs results] :as ctx}
@@ -202,21 +167,22 @@
         (let [step-name (first order)
               step      (get steps step-name)]
           (if-let [step-deps (:deps step)]
-            (let [step-fn   (resolve-step-fn strategy step)
-                  step-args (map (partial dependency-val strategy ctx) step-deps)
-                  step-ctx  {::step/name    step-name
-                             ::step/deps    step-deps
-                             ::step/fn      step-fn
-                             ::step/args    step-args
-                             ::i/queue      interceptors}
+            (let [step-fn   (resolve-step-fn step)
+                  step-args (map (partial dependency-val ctx) step-deps)
+                  step-ctx  {::step/name     step-name
+                             ::step/deps     step-deps
+                             ::step/fn       step-fn
+                             ::step/args     step-args
+                             ::i/queue       interceptors}
                   step-ctx  (if-let [step-plan (:plan step)]
                               (assoc step-ctx
                                      ::step/plan step-plan
                                      ::step/goal (:goal step))
                               step-ctx)
-                  result    (realize-step strategy step-ctx)]
+                  strategy  (or (:strategy step) step/in-sequence)
+                  result    (step/realize strategy step-ctx)]
               (recur (-> ctx
-                         (assoc-in [::results step-name] result)
+                         (assoc-in [::results step-name] #(step/deref-result strategy result))
                          (update ::order rest))))
             (recur (cond-> (update ctx ::order rest)
                      (not (contains? inputs step-name))
@@ -224,7 +190,7 @@
                                (get-or step
                                        :value
                                        (resolve-var step-name)))))))
-        (process-results strategy inputs results)))))
+        (process-results inputs results)))))
 
 (c/defn resolve-step-alias [step all-steps]
   (if-let [alias (:alias step)]
@@ -386,11 +352,11 @@
     inputs))
 
 (c/defn realize
-  ([strategy plan]
-   (realize strategy plan {}))
-  ([strategy plan inputs]
+  ([plan]
+   (realize plan {}))
+  ([plan inputs]
    (let [inputs (validated-inputs (::inputs plan) inputs)]
-     (realize-steps strategy inputs plan))))
+     (realize-steps inputs plan))))
 
 (c/defn get-step-spec [step]
   (or (:spec step)

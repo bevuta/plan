@@ -19,10 +19,10 @@ Here's the `stats` example from the Graph README expressed in `plan`:
 (def stats-plan
   (p/devise `v))
 
-(p/realize p/in-sequence stats-plan)
+(p/realize stats-plan)
 ;; => Exception: Missing plan inputs {:missing (example/xs)}
 
-(p/realize p/in-sequence stats-plan {`xs [1 2 3 6]})
+(p/realize stats-plan {`xs [1 2 3 6]})
 ;; => #:example{xs [1 2 3 6], n 4, m2 25/2, m 3, v 7/2}
 ```
 
