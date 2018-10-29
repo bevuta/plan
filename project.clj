@@ -1,4 +1,4 @@
-(defproject bevuta/plan "1-SNAPSHOT"
+(defproject bevuta/plan "1"
   :description "A clojure.spec flavored adaption of Prismatic^WPlumatic Graph"
   :url "https://github.com/bevuta/plan"
   :license {:name "Eclipse Public License"
