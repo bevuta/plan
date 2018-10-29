@@ -73,7 +73,7 @@
 
 (s/def ::fn ifn?)
 
-(s/def ::strategy strategy?)
+(s/def ::strategy any?)
 
 (s/def ::value any?)
 

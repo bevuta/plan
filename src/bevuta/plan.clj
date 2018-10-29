@@ -81,10 +81,14 @@
                :args (s/coll-of (s/or :symbol ::step/name
                                       :destructuring-map ::dep-destructuring)
                                 :kind vector?)
+               :step (s/? map?)
                :body (s/+ any?)))
 
-(defmacro defn [step-name args & body]
-  (let [deps (map (fn [arg]
+(defmacro defn [step-name args step-map? & body]
+  (let [[step body] (if (and (map? step-map?) (seq body))
+                      [(mapcat identity step-map?) body]
+                      [[] (cons step-map? body)])
+        deps (map (fn [arg]
                     (if (symbol? arg)
                       arg
                       (::dep arg)))
@@ -94,7 +98,7 @@
                        (unqualify-symbol arg)
                        (dissoc arg ::dep)))
                    args)]
-    `(do (bevuta.plan/def ~step-name :deps ~deps)
+    `(do (bevuta.plan/def ~step-name :deps ~deps ~@step)
          (c/defn ~step-name ~argv ~@body))))
 
 (c/defn resolve-var [var-name]

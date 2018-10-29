@@ -307,4 +307,26 @@
          (is (= `delta (::step/goal (ex-data e))))
          (is (= `#{gamma} (::p/subplan-goals (ex-data e)))))))
 
+(p/defn slow-alpha [alpha]
+  {:strategy step/in-parallel}
+  (Thread/sleep 50)
+  alpha)
+
+(p/defn slow-gamma [gamma]
+  {:strategy step/in-parallel}
+  (Thread/sleep 50)
+  gamma)
+
+(deftest step-strategies-test
+  (let [start (System/nanoTime)
+        results (p/realize (p/devise `[slow-alpha slow-gamma alpha gamma]) `{beta 2})
+        {::syms [slow-alpha alpha slow-gamma gamma]} results]
+    (is (some? slow-alpha))
+    (is (some? slow-gamma))
+    (is (= slow-alpha alpha))
+    (is (= slow-gamma gamma))
+    (is (<= 49
+            (long (/ (- (System/nanoTime) start) 1000000))
+            70))))
+
 ;; TODO: Test metadata of results
