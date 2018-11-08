@@ -118,10 +118,12 @@
        ::step/value (get results goal)})))
 
 (c/defn resolve-step-fn [step]
-  (if (:plan step)
-    (subplan-step-fn step)
-    (or (:fn step)
-        (resolve-var (:name step)))))
+  (cond-> step
+    (:deps step)
+    (assoc :fn (if (:plan step)
+                 (subplan-step-fn step)
+                 (or (:fn step)
+                     (resolve-var (:name step)))))))
 
 (def step-fn-interceptor
   {:enter (fn [ctx]
@@ -171,11 +173,10 @@
         (let [step-name (first order)
               step      (get steps step-name)]
           (if-let [step-deps (:deps step)]
-            (let [step-fn   (resolve-step-fn step)
-                  step-args (map (partial dependency-val ctx) step-deps)
+            (let [step-args (map (partial dependency-val ctx) step-deps)
                   step-ctx  {::step/name     step-name
                              ::step/deps     step-deps
-                             ::step/fn       step-fn
+                             ::step/fn       (:fn step)
                              ::step/args     step-args
                              ::i/queue       interceptors}
                   step-ctx  (if-let [step-plan (:plan step)]
@@ -270,7 +271,8 @@
             (assoc :name step-name)
             (resolve-step-alias all-steps)
             (apply-injections (:inject overrides))
-            (devise-subplan))))
+            (devise-subplan)
+ (resolve-step-fn))))
 
 (c/defn resolve-goals [all-steps overrides goals]
   (loop [deps goals
