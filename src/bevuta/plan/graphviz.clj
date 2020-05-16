@@ -1,6 +1,15 @@
 (ns bevuta.plan.graphviz
   (:require [bevuta.plan :as p]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.java.shell :as shell]
+            [clojure.java.io :as io])
+  (:import javax.imageio.ImageIO
+           javax.swing.ImageIcon
+           javax.swing.JLabel
+           javax.swing.JPanel
+           javax.swing.JFrame
+           javax.swing.JOptionPane))
+
 
 (defn quoted
   ([prefix s]
@@ -58,10 +67,13 @@
                             ["}"]))))))
            steps)))
 
+(defn plan-name [plan]
+  (or (::p/name plan) "plan"))
+
 (defn dot [plan]
   (let [aliases (current-ns-aliases)]
     (str "digraph "
-         (quoted (or (::p/name plan) "plan"))
+         (quoted (plan-name plan))
          " {\n"
          (->> (concat
                (->> (::p/inputs plan)
@@ -72,3 +84,20 @@
                      (str "  " stmt ";")))
               (str/join "\n"))
          "\n}")))
+
+(defn render [plan]
+  (with-open [in (java.io.ByteArrayInputStream.
+                  (:out (shell/sh "dot" "-Tpng"
+                                  :in (dot plan)
+                                  :out-enc :bytes)))]
+    (ImageIO/read in)))
+
+(defn show [plan]
+  (let [png   (render plan)
+        image (ImageIcon. png)
+        label (JLabel.  image)]
+    (JOptionPane/showMessageDialog nil
+                                   label
+                                   (plan-name plan)
+                                   JOptionPane/PLAIN_MESSAGE
+                                   nil)))
