@@ -5,7 +5,7 @@
     (if-let [error (::error ctx)]
       (f (dissoc ctx ::error) error)
       (f ctx))
-    (catch Throwable exn
+    (catch #?(:clj Throwable  :cljs :default) exn
       (assoc ctx ::error exn))))
 
 (defn terminate [ctx]

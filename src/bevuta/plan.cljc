@@ -4,7 +4,10 @@
             [clojure.spec.alpha :as s]
             [clojure.set :as set]
             [bevuta.interceptors :as i]
-            [bevuta.plan.step :as step]))
+            [bevuta.plan.step :as step]
+            [bevuta.plan.override :as override]
+            [bevuta.plan.util :as util])
+  #?(:cljs (:require-macros [bevuta.plan :refer [def defn fdefs get-or]])))
 
 (c/defn unqualify-symbol [s]
   (symbol (name s)))
@@ -22,9 +25,6 @@
   (s/and (s/or :multi  (s/coll-of ::step/name :into #{})
                :single (s/and ::step/name (s/conformer vector) ::goals))
          (s/conformer val)))
-
-(create-ns 'bevuta.plan.override)
-(alias 'override 'bevuta.plan.override)
 
 (s/def ::override/replace
   (s/map-of ::step/name (s/or :step ::step
@@ -57,19 +57,51 @@
     (:goal step)
     (update :goal quote-value)))
 
+#?(:clj
+   (c/defn resolve-var [var-name]
+     (if-let [var (resolve var-name)]
+       @var
+       (throw (ex-info (str "Unable to resolve var " var-name)
+                       {::var-name var-name})))))
+
+#?(:clj
+   (c/defn expand-step [step-name step]
+     (cond (:goal step)
+           step
+
+           (and (:deps step) (not (:fn step)))
+           (assoc step :fn
+                  (let [args (map (comp gensym unqualify-symbol) (:deps step))
+                        op   (if (util/cljs-macro?)
+                               step-name
+                               `(resolve-var '~step-name))]
+                    `(fn [~@args]
+                       (~op ~@args))))
+
+           (not (:deps step))
+           (assoc step :value-fn (if (util/cljs-macro?)
+                                   `(fn [] ~step-name)
+                                   `#(resolve-var '~step-name))))))
+
 (s/fdef def
   :args (s/cat :name ::step/name
                :step ::step*))
 
-(defmacro def
-  [step-name & definition]
-  (let [step-name (s/conform ::step/name step-name)
-        step (or (s/conform ::step* definition) {})]
-    `(do (swap! step-registry
-                assoc
-                '~step-name
-                ~(quote-step step))
-         '~step-name)))
+(c/defn register-step [step-name step]
+  (swap! step-registry
+         assoc
+         step-name
+         step)
+  step-name)
+
+#?(:clj
+   (defmacro def
+     [step-name & definition]
+     (binding [util/*macro-env* &env]
+       (let [step-name (s/conform ::step/name step-name)
+             step (or (s/conform ::step* definition) {})
+             step (expand-step step-name step)]
+         `(register-step '~step-name ~(quote-step step))))))
 
 (s/def ::dep ::step/dep)
 
@@ -84,28 +116,23 @@
                :step (s/? map?)
                :body (s/+ any?)))
 
-(defmacro defn [step-name args step-map? & body]
-  (let [[step body] (if (and (map? step-map?) (seq body))
-                      [(mapcat identity step-map?) body]
-                      [[] (cons step-map? body)])
-        deps (map (fn [arg]
-                    (if (symbol? arg)
-                      arg
-                      (::dep arg)))
-                  args)
-        argv (mapv (fn [arg]
-                     (if (symbol? arg)
-                       (unqualify-symbol arg)
-                       (dissoc arg ::dep)))
-                   args)]
-    `(do (bevuta.plan/def ~step-name :deps ~deps ~@step)
-         (c/defn ~step-name ~argv ~@body))))
-
-(c/defn resolve-var [var-name]
-  (if-let [var (resolve var-name)]
-    @var
-    (throw (ex-info (str "Unable to resolve var " var-name)
-                    {::var-name var-name}))))
+#?(:clj
+   (defmacro defn [step-name args step-map? & body]
+     (let [[step body] (if (and (map? step-map?) (seq body))
+                         [(mapcat identity step-map?) body]
+                         [[] (cons step-map? body)])
+           deps (map (fn [arg]
+                       (if (symbol? arg)
+                         arg
+                         (::dep arg)))
+                     args)
+           argv (mapv (fn [arg]
+                        (if (symbol? arg)
+                          (unqualify-symbol arg)
+                          (dissoc arg ::dep)))
+                      args)]
+       `(do (c/defn ~step-name ~argv ~@body)
+            (bevuta.plan/def ~step-name :deps ~deps ~@step)))))
 
 (declare realize-steps)
 
@@ -122,8 +149,7 @@
     (:deps step)
     (assoc :fn (if (:plan step)
                  (subplan-step-fn step)
-                 (or (:fn step)
-                     (resolve-var (:name step)))))))
+                 (:fn step)))))
 
 (def step-fn-interceptor
   {:enter (fn [ctx]
@@ -136,10 +162,11 @@
 (c/defn add-interceptors [plan & interceptors]
   (update plan ::interceptors (fnil into []) interceptors))
 
-(defmacro get-or [map key else]
-  `(if-let [[_# value#] (find ~map ~key)]
-     value#
-     ~else))
+#?(:clj
+   (defmacro get-or [map key else]
+     `(if-let [[_# value#] (find ~map ~key)]
+        value#
+        ~else)))
 
 (c/defn dependency-val [ctx step-name]
   (get-or (::inputs ctx)
@@ -194,7 +221,8 @@
                      (assoc-in [::inputs step-name]
                                (get-or step
                                        :value
-                                       (resolve-var step-name)))))))
+                                       (when-let [value-fn (:value-fn step)]
+                                         (value-fn))))))))
         (process-results inputs results)))))
 
 (c/defn resolve-step-alias [step all-steps]
@@ -220,7 +248,8 @@
                             deps))))))
 
 (c/defn map-entry [k v]
-  (clojure.lang.MapEntry. k v))
+  #?(:clj  (clojure.lang.MapEntry. k v)
+     :cljs (cljs.core.MapEntry. k v)))
 
 (c/defn process-overrides [overrides]
   (reduce (fn [overrides [step-name [inject-kind inject]]]
@@ -369,33 +398,34 @@
       (when-let [s (s/get-spec (:name step))]
         (or (:ret s) s))))
 
-(defmacro fdefs []
-  (let [all-steps @step-registry
-        ns-steps (->> (ns-interns *ns*)
-                      (keys)
-                      (map #(symbol (name (ns-name *ns*)) (name %)))
-                      (filter all-steps))
-        ns-plan (devise ns-steps)
-        ns-step-specs (->> (::inputs ns-plan)
-                           (map (fn [input]
-                                  (assoc (get all-steps input) :name input)))
-                           (concat (vals (::steps ns-plan)))
-                           (map (juxt :name get-step-spec))
-                           (into {}))
-        ns-dep-steps (filter :deps (vals (::steps ns-plan)))]
-    (when-let [missing (->> ns-step-specs (remove val) (map key) seq)]
-      (throw (ex-info "Missing specs for some steps"
-                      {::missing-specs missing})))
-    `(do
-       ~@(->> ns-dep-steps
-              (map (fn [step]
-                     (let [step-name (:name step)]
-                       `(s/fdef ~step-name
-                          :args (s/cat ~@(mapcat (fn [dep-name]
-                                                   [(keyword (str dep-name))
-                                                    (get ns-step-specs dep-name)])
-                                                 (:deps step)))
-                          ~@(when-let [fn-spec (:fn (s/get-spec step-name))]
-                              [:fn fn-spec])
-                          :ret ~(get ns-step-specs step-name))))))
-       '~(mapv :name ns-dep-steps))))
+#?(:clj
+   (defmacro fdefs []
+     (let [all-steps @step-registry
+           ns-steps (->> (ns-interns *ns*)
+                         (keys)
+                         (map #(symbol (name (ns-name *ns*)) (name %)))
+                         (filter all-steps))
+           ns-plan (devise ns-steps)
+           ns-step-specs (->> (::inputs ns-plan)
+                              (map (fn [input]
+                                     (assoc (get all-steps input) :name input)))
+                              (concat (vals (::steps ns-plan)))
+                              (map (juxt :name get-step-spec))
+                              (into {}))
+           ns-dep-steps (filter :deps (vals (::steps ns-plan)))]
+       (when-let [missing (->> ns-step-specs (remove val) (map key) seq)]
+         (throw (ex-info "Missing specs for some steps"
+                         {::missing-specs missing})))
+       `(do
+          ~@(->> ns-dep-steps
+                 (map (fn [step]
+                        (let [step-name (:name step)]
+                          `(s/fdef ~step-name
+                             :args (s/cat ~@(mapcat (fn [dep-name]
+                                                      [(keyword (str dep-name))
+                                                       (get ns-step-specs dep-name)])
+                                                    (:deps step)))
+                             ~@(when-let [fn-spec (:fn (s/get-spec step-name))]
+                                 [:fn fn-spec])
+                             :ret ~(get ns-step-specs step-name))))))
+          '~(mapv :name ns-dep-steps)))))

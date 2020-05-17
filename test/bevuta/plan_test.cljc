@@ -1,5 +1,5 @@
 (ns bevuta.plan-test
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing]]
             [clojure.spec.alpha :as s]
             [bevuta.interceptors :as interceptors]
             [bevuta.plan :as p]
@@ -48,14 +48,14 @@
 
 (deftest realize-with-missing-inputs-test
   (let [e (try (p/realize alpha-plan)
-               (catch Exception e [::thrown e]))]
+               (catch #?(:clj Exception :cljs :default) e [::thrown e]))]
     (is (= (first e) ::thrown))
     (is (= (ex-data (second e)) {::p/missing-inputs [`beta]}))))
 
 (deftest devise-goals-which-are-inputs
   (try (p/devise `[alpha an-undefined-step-as-goal another-undefined-step-as-goal])
        (is false "Devise shouldn't have succeeded")
-       (catch Exception e
+       (catch #?(:clj Exception :cljs :default) e
          (is (= `#{an-undefined-step-as-goal another-undefined-step-as-goal}
                 (::p/undefined-goals (ex-data e)))))))
 
@@ -67,7 +67,7 @@
 (deftest devise-with-cycles
   (try (p/devise `[cycle-a cycle-d])
        (is false "Devise shouldn't have succeeded")
-       (catch Exception e
+       (catch #?(:clj Exception :cljs :default) e
          (is (= `{cycle-a #{cycle-b},
                   cycle-b #{cycle-c},
                   cycle-c #{cycle-a},
@@ -181,7 +181,7 @@
   (try
     (p/realize (p/devise `boom) {`beta 10})
     (is false)
-    (catch Exception e
+    (catch #?(:clj Exception :cljs :default) e
       (is (= (ex-data e) {::boom ::boom})))))
 
 (deftest interceptor-test
@@ -208,7 +208,7 @@
                                                  (throw (ex-info "boom" {:no 3})))}))
                {`beta 10})
     (is false)
-    (catch Exception e
+    (catch #?(:clj Exception :cljs :default) e
       (let [data (ex-data e)]
         (is (= (dissoc data :ctx) {:no 1}))
         (is (= (count (::interceptors/suppressed-errors (:ctx data))) 2))))))
@@ -222,19 +222,19 @@
                    (p/add-interceptors pi/error-context))
                {`beta 10})
     (is false "Didn't throw exception")
-    (catch Exception e
+    (catch #?(:clj Exception :cljs :default) e
       (is (= (::step/name (ex-data e)) `boom))
-      (is (= (ex-data (.getCause e)) {::boom ::boom})))))
+      (is (= (ex-data (ex-cause e)) {::boom ::boom})))))
+
 
 (deftest handle-error-interceptor-test
   (let [result (p/realize (-> (p/devise `boom-dependent)
                               (p/add-interceptors (pi/handle-error
-                                                   RuntimeException
+                                                   #?(:clj RuntimeException :cljs :default)
                                                    (fn [ctx error]
                                                      (assoc ctx ::step/value ::no-problem)))))
                           {`beta 10})]
     (is (= (get result `boom) ::no-problem))))
-
 
 (deftest when-interceptor-test
   (let [log1 (atom #{})
@@ -253,12 +253,13 @@
     (is (= `#{alpha delta gamma} @log1))
     (is (= `#{delta gamma} @log2))))
 
-(deftest time-interceptor-test
-  (let [result (p/realize (p/add-interceptors alpha-plan pi/time)
-                          `{beta 2})
-        timings (->> result meta ::p/results vals (map ::pi/time-ns))]
-    (is (seq timings))
-    (is (every? nat-int? timings))))
+#?(:clj
+   (deftest time-interceptor-test
+     (let [result (p/realize (p/add-interceptors alpha-plan pi/time)
+                             `{beta 2})
+           timings (->> result meta ::p/results vals (map ::pi/time-duration))]
+       (is (seq timings))
+       (is (every? nat-int? timings)))))
 
 ;; TODO: Notice that delta is the same step as in the parent plan, so
 ;; it could be re-used instead of re-calclated for the subplan. This
@@ -302,31 +303,34 @@
 (deftest subplan-with-explicit-plan-for-different-goal
   (try (p/devise `broken-subdelta)
        (is false "Devise shouldn't have succeeded")
-       (catch Exception e
+       (catch #?(:clj Exception :cljs :default) e
          (is (= `broken-subdelta (::step/name (ex-data e))))
          (is (= `delta (::step/goal (ex-data e))))
          (is (= `#{gamma} (::p/subplan-goals (ex-data e)))))))
 
-(p/defn slow-alpha [alpha]
-  {:strategy step/in-parallel}
-  (Thread/sleep 50)
-  alpha)
+#?(:clj
+   (p/defn slow-alpha [alpha]
+     {:strategy step/in-parallel}
+     (Thread/sleep 50)
+     alpha))
+#?(:clj
+   (p/defn slow-gamma [gamma]
+     {:strategy step/in-parallel}
+     (Thread/sleep 50)
+     gamma))
 
-(p/defn slow-gamma [gamma]
-  {:strategy step/in-parallel}
-  (Thread/sleep 50)
-  gamma)
-
-(deftest step-strategies-test
-  (let [start (System/nanoTime)
-        results (p/realize (p/devise `[slow-alpha slow-gamma alpha gamma]) `{beta 2})
-        {::syms [slow-alpha alpha slow-gamma gamma]} results]
-    (is (some? slow-alpha))
-    (is (some? slow-gamma))
-    (is (= slow-alpha alpha))
-    (is (= slow-gamma gamma))
-    (is (<= 49
-            (long (/ (- (System/nanoTime) start) 1000000))
-            70))))
+#?(:clj
+   (deftest step-strategies-test
+     (let [start (System/nanoTime)
+           results (p/realize (p/devise `[slow-alpha slow-gamma alpha gamma]) `{beta 2})
+           {::syms [slow-alpha alpha slow-gamma gamma]} results]
+       (is (some? slow-alpha))
+       (is (some? slow-gamma))
+       (is (= slow-alpha alpha))
+       (is (= slow-gamma gamma))
+       (is (<= 49
+               (long (/ (- (System/nanoTime) start) 1000000))
+               70)))))
 
 ;; TODO: Test metadata of results
+
