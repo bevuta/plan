@@ -81,7 +81,10 @@
            (not (:deps step))
            (assoc step :value-fn (if (util/cljs-macro?)
                                    `(fn [] ~step-name)
-                                   `#(resolve-var '~step-name))))))
+                                   `#(resolve-var '~step-name)))
+
+           :else
+           step)))
 
 (s/fdef def
   :args (s/cat :name ::step/name
@@ -249,7 +252,7 @@
 
 (c/defn map-entry [k v]
   #?(:clj  (clojure.lang.MapEntry. k v)
-     :cljs (cljs.core.MapEntry. k v)))
+     :cljs (cljs.core.MapEntry. k v nil)))
 
 (c/defn process-overrides [overrides]
   (reduce (fn [overrides [step-name [inject-kind inject]]]
@@ -301,7 +304,7 @@
             (resolve-step-alias all-steps)
             (apply-injections (:inject overrides))
             (devise-subplan)
- (resolve-step-fn))))
+            (resolve-step-fn))))
 
 (c/defn resolve-goals [all-steps overrides goals]
   (loop [deps goals
